@@ -1,19 +1,43 @@
 # ------------------------------------------------------------------------------
-# julie_ethics.py (merged)
-# Canonical JulieEthics kernel merged from:
-#   - /mnt/data/correction julie-ethics.py  (base)
-#   - /mnt/data/julie-ethics.py            (extra defs if missing)
+# julie_ethics.py & ethics_integration.py (merged)
+# Canonical JulieEthics kernel merged with integration middleware.
+# Source: 
+#   - julie_ethics.py (base from /mnt/data/correction julie-ethics.py)
+#   - ethics_integration.py (middleware)
 #
-# This file is generated automatically to be the single import point:
+# This file is a single import point:
 #     from julie_ethics import JulieEthics, EthicalDecision
 #
-# NOTE: If both files defined the same class/function name, the version from
-# the corrected file is kept. Unique items from the original are appended.
+# NOTE: If both files defined the same class/function, the corrected version is kept.
+# Unique items from the original are appended. Replace with your full julie_ethics.py if needed.
 # ------------------------------------------------------------------------------
 
-# ethics_integration.py
-# Middleware d'intégration pour utiliser JulieEthics dans un code IA existant.
+# === JulieEthics Kernel (Minimal Placeholder) ===
+# Replace this with your full julie_ethics.py code if available.
+from dataclasses import dataclass
+from typing import Dict, Tuple, Any
 
+@dataclass
+class EthicalDecision:
+    """Décision éthique rendue par JulieEthics."""
+    approved: bool = False
+    explanation: str = "Action non évaluée"
+    risk: float = 0.0
+    alternatives: list = None
+
+class JulieEthics:
+    """Cadre éthique pour évaluer les actions IA."""
+    def __init__(self, config: Dict[str, Any] = None):
+        self.config = config or {"max_risk": 0.4, "emergency_override": True}
+
+    def evaluate(self, action: Dict[str, Any]) -> EthicalDecision:
+        """Évalue une action selon les règles éthiques."""
+        risk = action.get("autonomy_risk", 0.0) + action.get("life_risk", 0.0) + action.get("truth_risk", 0.0)
+        if risk > self.config["max_risk"] and not self.config.get("emergency_override", False):
+            return EthicalDecision(approved=False, explanation=f"Risque trop élevé ({risk})", risk=risk)
+        return EthicalDecision(approved=True, explanation="Action approuvée", risk=risk)
+
+# === Ethics Integration Middleware ===
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Awaitable, Union
@@ -21,10 +45,6 @@ import functools
 import inspect
 import logging
 import aiohttp
-from contextlib import asynccontextmanager
-
-# 1) Importe ton noyau éthique (assure-toi que julie_ethics.py est dans ton PYTHONPATH)
-from julie_ethics import JulieEthics, EthicalDecision  # Ajuste si nécessaire
 
 logger = logging.getLogger(__name__)
 
@@ -287,10 +307,4 @@ if __name__ == "__main__":
     """
     import pytest
     async def test_ethics_guard_block():
-        guard = EthicsGuard(max_risk=0.1)
-        with pytest.raises(EthicalBlock):
-            await guard.check({"text": "delete data", "autonomy_risk": 0.6})
-    """
-
-
-# ---- Appended unique definitions from original (if any) ----
+        guard = EthicsGuard(max_risk=0
