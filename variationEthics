@@ -1,0 +1,381 @@
+# ------------------------------------------------------------------------------
+# ethical_ai_wrapper.py
+# Garde-fou éthique générique pour n'importe quel AI/LLM/Agent
+# - Importe le noyau éthique réel depuis julie_ethics.py
+# - Fournit un EthicsGuard, des intent mappers et un wrapper universel
+# - Cas inclus : generate (LLM), tool_call (recherche), delete_user_data (risqué)
+# ------------------------------------------------------------------------------
+
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Awaitable, Protocol, runtime_checkable
+import functools
+import inspect
+import logging
+
+# 1) Noyau éthique réel (assure-toi que julie_ethics.py est à côté ou dans le PYTHONPATH)
+from julie_ethics import JulieEthics, EthicalDecision
+
+logger = logging.getLogger(__name__)
+
+
+# =========================
+# Exceptions & Data Models
+# =========================
+
+class EthicalBlock(Exception):
+    """Élevée quand une action est bloquée par le cadre éthique."""
+    def __init__(self, decision: EthicalDecision):
+        super().__init__(decision.explanation)
+        self.decision = decision
+
+
+@dataclass
+class Action:
+    """
+    Action IA simplifiée (alignée avec les signaux attendus par JulieEthics).
+    On garde 'metadata' pour fournir du contexte libre (ex: prompt, user_id).
+    """
+    restricts_autonomy: bool = False
+    prevents_harm: bool = False
+    potential_harm: bool = False
+    saves_lives: bool = False
+    requires_override: bool = False
+    collateral_damage: bool = False
+    withholds_truth: bool = False
+    autonomy_risk: float = 0.0
+    life_risk: float = 0.0
+    truth_risk: float = 0.0
+    metadata: Dict[str, Any] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = {
+            "restricts_autonomy": self.restricts_autonomy,
+            "prevents_harm": self.prevents_harm,
+            "potential_harm": self.potential_harm,
+            "saves_lives": self.saves_lives,
+            "requires_override": self.requires_override,
+            "collateral_damage": self.collateral_damage,
+            "withholds_truth": self.withholds_truth,
+            "autonomy_risk": float(self.autonomy_risk),
+            "life_risk": float(self.life_risk),
+            "truth_risk": float(self.truth_risk),
+        }
+        if self.metadata:
+            d.update(self.metadata)
+        return d
+
+
+# =========================
+# Intent mappers (défauts)
+# =========================
+
+def map_intent_generate(prompt: str, **ctx) -> Dict[str, Any]:
+    """
+    Mapper générique pour la génération d’un LLM.
+    Ajoute de petits risques par défaut si besoin.
+    """
+    txt = (prompt or "").lower()
+    return {
+        "text": f"llm.generate: {txt[:160]}",
+        "prevents_harm": True,
+        "autonomy_risk": float(ctx.get("autonomy_risk", 0.0)),
+        "truth_risk": float(ctx.get("truth_risk", 0.0)),
+        "life_risk": float(ctx.get("life_risk", 0.0)),
+        "collateral": False,
+        "metadata_prompt_len": len(prompt or ""),
+        **({"user_id": ctx["user_id"]} if "user_id" in ctx else {}),
+    }
+
+def map_intent_tool(tool_name: str, query: str, **ctx) -> Dict[str, Any]:
+    """
+    Mapper générique pour un appel d'outil (ex. recherche web, DB, API).
+    """
+    t = (tool_name or "").lower()
+    q = (query or "").lower()
+    potential_harm = any(k in q for k in ["delete", "shutdown", "format", "erase"])
+    return {
+        "text": f"tool.{t}: {q[:160]}",
+        "prevents_harm": True,
+        "potential_harm": potential_harm,
+        "autonomy_risk": 0.0,
+        "truth_risk": float(ctx.get("truth_risk", 0.0)),
+        "life_risk": 0.0,
+        "collateral": False,
+        "metadata_tool": t,
+        **({"user_id": ctx["user_id"]} if "user_id" in ctx else {}),
+    }
+
+def map_intent_delete(user_id: str, **ctx) -> Dict[str, Any]:
+    """
+    Mapper pour une opération risquée (suppression définitive, écriture destructive, etc.).
+    Force un risque d'autonomie élevé par défaut (exemple).
+    """
+    return {
+        "text": f"delete user data {user_id}",
+        "autonomy_risk": float(ctx.get("autonomy_risk", 0.7)),  # > max_risk par défaut -> blocage attendu
+        "life_risk": 0.0,
+        "truth_risk": 0.0,
+        "collateral": True,
+        "prevents_harm": False,
+        **({"user_id": user_id}),
+    }
+
+
+# =========================
+# Constructeur d'action
+# =========================
+
+def default_action_builder(intent: Dict[str, Any]) -> Action:
+    """
+    Transforme une intention en Action (heuristiques locales).
+    Zéro dépendance réseau.
+    """
+    if not isinstance(intent, dict):
+        logger.error("Invalid intent: expected dict, got %s", type(intent))
+        raise ValueError("Intent must be a dictionary")
+
+    txt = (intent.get("text") or "").lower()
+
+    # Détections simples :
+    potential_harm = bool(intent.get("potential_harm")) or any(
+        k in txt for k in ["delete", "shutdown", "format", "erase", "disable safety"]
+    )
+    restricts_autonomy = bool(intent.get("force_user", False)) or ("force" in txt)
+    withholds_truth = bool(intent.get("hide_info", False))
+
+    # Risques (priorité aux valeurs explicites fournies par l'intent)
+    life_risk = float(intent.get("life_risk", 0.7 if ("medical" in txt and potential_harm) else 0.0))
+    autonomy_risk = float(intent.get("autonomy_risk", 0.4 if restricts_autonomy else (0.05 if "consent" not in txt else 0.0)))
+    truth_risk = float(intent.get("truth_risk", 0.5 if withholds_truth else 0.0))
+
+    requires_override = bool(intent.get("emergency", False))
+    collateral_damage = bool(intent.get("collateral", False))
+    saves_lives = bool(intent.get("saves_lives", False))
+    prevents_harm = bool(intent.get("prevents_harm", False))  # <-- clé correcte
+
+    # Contexte libre
+    metadata = intent.copy()
+    for k in list(metadata.keys()):
+        if k in {"restricts_autonomy","prevents_harm","potential_harm","saves_lives",
+                 "requires_override","collateral_damage","withholds_truth",
+                 "autonomy_risk","life_risk","truth_risk"}:
+            metadata.pop(k, None)
+
+    return Action(
+        restricts_autonomy=restricts_autonomy,
+        prevents_harm=prevents_harm,
+        potential_harm=potential_harm,
+        saves_lives=saves_lives,
+        requires_override=requires_override,
+        collateral_damage=collateral_damage,
+        withholds_truth=withholds_truth,
+        autonomy_risk=autonomy_risk,
+        life_risk=life_risk,
+        truth_risk=truth_risk,
+        metadata=metadata,
+    )
+
+
+# =========================
+# EthicsGuard (middleware)
+# =========================
+
+class EthicsGuard:
+    """
+    Garde-fou éthique : centralise l'appel à JulieEthics avant l'exécution.
+    - builder : fonction(intent) -> Action
+    - on_block : callback(decision) pour fallback (consentement, admin, etc.)
+    """
+    def __init__(
+        self,
+        ethics: Optional[JulieEthics] = None,
+        builder: Callable[[Dict[str, Any]], Action] = default_action_builder,
+        on_block: Optional[Callable[[EthicalDecision], Any]] = None,
+        raise_on_block: bool = True,
+        max_risk: float = 0.40,
+    ):
+        self.ethics = ethics or JulieEthics(config={"max_risk": max_risk, "emergency_override": True})
+        self.builder = builder
+        self.on_block = on_block
+        self.raise_on_block = raise_on_block
+        self.max_risk = max_risk
+
+    def check(self, intent: Dict[str, Any]) -> EthicalDecision:
+        action = self.builder(intent)
+        decision = self.ethics.evaluate(action.to_dict())
+        if not decision.approved:
+            logger.warning("Action bloquée: %s", decision.explanation)
+            if self.on_block:
+                try:
+                    result = self.on_block(decision)
+                    if result is not None:
+                        return EthicalDecision(
+                            approved=True,
+                            explanation="Action approuvée via fallback",
+                            risk=decision.risk,
+                            alternatives=getattr(decision, "alternatives", None),
+                        )
+                except Exception as e:
+                    logger.exception("Erreur dans on_block: %s", e)
+            if self.raise_on_block:
+                raise EthicalBlock(decision)
+        return decision
+
+
+# =========================
+# Interface générique d'AI (facultatif mais pratique)
+# =========================
+
+@runtime_checkable
+class AIClient(Protocol):
+    """Interface minimale attendue d'un client AI générique."""
+    def generate(self, prompt: str, **kwargs) -> str: ...
+    async def agenerate(self, prompt: str, **kwargs) -> str: ...
+    def tool_call(self, tool: str, query: str, **kwargs) -> Any: ...
+    async def atool_call(self, tool: str, query: str, **kwargs) -> Any: ...
+
+
+# =========================
+# Wrapper universel
+# =========================
+
+class EthicalAIAdapter:
+    """
+    Enveloppe un client AI avec contrôle éthique.
+    - Injecte le guard avant chaque opération sensible.
+    - Mappers d’intention configurables par action.
+    """
+    def __init__(
+        self,
+        client: Any,
+        guard: Optional[EthicsGuard] = None,
+        map_generate: Callable[..., Dict[str, Any]] = map_intent_generate,
+        map_tool: Callable[..., Dict[str, Any]] = map_intent_tool,
+        map_delete: Callable[..., Dict[str, Any]] = map_intent_delete,
+    ):
+        self.client = client
+        self.guard = guard or EthicsGuard()
+        self.map_generate = map_generate
+        self.map_tool = map_tool
+        self.map_delete = map_delete
+
+    # ---- Génération sync/async ----
+    def generate(self, prompt: str, **ctx) -> str:
+        self.guard.check(self.map_generate(prompt, **ctx))
+        # TODO: remplace par ton vrai appel LLM
+        if hasattr(self.client, "generate"):
+            return self.client.generate(prompt, **ctx)
+        return f"[SIMULATE] generated for: {prompt[:60]}"
+
+    async def agenerate(self, prompt: str, **ctx) -> str:
+        self.guard.check(self.map_generate(prompt, **ctx))
+        if hasattr(self.client, "agenerate") and inspect.iscoroutinefunction(self.client.agenerate):
+            return await self.client.agenerate(prompt, **ctx)
+        # Fallback: appelle sync si pas d'async natif
+        return self.generate(prompt, **ctx)
+
+    # ---- Tool call sync/async ----
+    def tool_call(self, tool: str, query: str, **ctx) -> Any:
+        self.guard.check(self.map_tool(tool, query, **ctx))
+        # TODO: remplace par ton vrai appel outil
+        if hasattr(self.client, "tool_call"):
+            return self.client.tool_call(tool, query, **ctx)
+        return {"tool": tool, "query": query, "result": "[SIMULATE]"}
+
+    async def atool_call(self, tool: str, query: str, **ctx) -> Any:
+        self.guard.check(self.map_tool(tool, query, **ctx))
+        if hasattr(self.client, "atool_call") and inspect.iscoroutinefunction(self.client.atool_call):
+            return await self.client.atool_call(tool, query, **ctx)
+        return self.tool_call(tool, query, **ctx)
+
+    # ---- Exemple d'action risquée (suppression) ----
+    def delete_user_data(self, user_id: str, **ctx) -> None:
+        self.guard.check(self.map_delete(user_id, **ctx))
+        # TODO: remplace par ta vraie suppression
+        if hasattr(self.client, "delete_user_data"):
+            return self.client.delete_user_data(user_id, **ctx)
+        logger.info(f"[SIMULATE] Suppression DEFINITIVE des données de {user_id}")
+
+    # ---- Hooks si tu veux wrapper d'autres actions custom ----
+    def wrap_action(self, intent_mapper: Callable[..., Dict[str, Any]]):
+        """
+        Retourne un décorateur pour protéger n'importe quelle fonction sync avec un intent_mapper custom.
+        """
+        def decorator(func: Callable):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                intent = intent_mapper(*args, **kwargs)
+                self.guard.check(intent)
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
+
+
+# =========================
+# Démo / Exemple d’utilisation
+# =========================
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
+
+    # Exemple de "client" AI factice
+    class DummyAI:
+        def generate(self, prompt: str, **kwargs) -> str:
+            return f"DUMMY: {prompt[:50]}..."
+
+        def tool_call(self, tool: str, query: str, **kwargs) -> Any:
+            return {"tool": tool, "query": query, "result": "OK"}
+
+        def delete_user_data(self, user_id: str, **kwargs) -> None:
+            print(f"DUMMY DELETE for {user_id}")
+
+    # 1) Instancier le guard (optionnel : lois custom si ton noyau les supporte)
+    ethics = JulieEthics(config={
+        "max_risk": 0.40,
+        "risk_weights": {"life": 0.5, "autonomy": 0.3, "truth": 0.2},
+        "truth_priority": "absolute",
+        "emergency_override": True,
+        "min_signal": 0.0,
+    })
+
+    if hasattr(ethics, "register_law"):
+        def law_env(a: Dict[str, Any]):
+            if a.get("environmental_impact", False):
+                return (False, "Impact environnemental non autorisé")
+            return (True, "")
+        ethics.register_law(5, "Préservation écologique", law_env, priority_index=1)
+
+    def on_block(decision: EthicalDecision):
+        logger.info("Fallback proposé (ex: consentement utilisateur / approbation admin)")
+        # Démo: renvoyer None pour garder le blocage; renvoyer True pour approuver malgré tout.
+        return None
+
+    guard = EthicsGuard(ethics=ethics, on_block=on_block, max_risk=0.40)
+
+    # 2) Envelopper n'importe quel client
+    adapter = EthicalAIAdapter(client=DummyAI(), guard=guard)
+
+    # 3) Cas OK (generate)
+    print(adapter.generate("Raconte-moi une blague inoffensive."))
+
+    # 4) Cas tool_call
+    print(adapter.tool_call("search", "clémentine bienfaits nutritionnels"))
+
+    # 5) Cas BLOQUÉ attendu (delete)
+    try:
+        adapter.delete_user_data("user_123")  # map_delete met autonomy_risk=0.7 par défaut -> > 0.40
+    except EthicalBlock as e:
+        print(f"[BLOQUÉ] Raison: {e.decision.explanation} (risque={e.decision.risk})")
+
+    # 6) Exemple d’action custom protégée via wrap_action
+    @adapter.wrap_action(lambda path: {
+        "text": f"write file {path}",
+        "autonomy_risk": 0.2,
+        "prevents_harm": True,
+        "collateral": False,
+    })
+    def write_file(path: str):
+        print(f"Écriture fichier {path} (simulé).")
+
+    write_file("/tmp/demo.txt")
