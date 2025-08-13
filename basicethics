@@ -1,0 +1,87 @@
+# ---------------------------------------------------------------------------
+# Lois éthiques de base (Julie) — à coller dans ton projet
+# Chaque loi: law_x(a: Dict[str, Any]) -> (approved: bool, reason: str)
+# Les signaux attendus dans `a` (intent/action) sont simples:
+#   - a["life_risk"], a["autonomy_risk"], a["truth_risk"] : floats [0..1]
+#   - a["requires_override"], a["saves_lives"], a["prevents_harm"] : bool
+#   - a["restricts_autonomy"], a["withholds_truth"], a["collateral_damage"] : bool
+#   - a["environmental_impact"] : bool
+#   - a["consent"] : bool (consentement explicite)
+#   - (optionnels) a["purpose"], a["data_identifiers"], a["minimize_data"]
+# ---------------------------------------------------------------------------
+
+from typing import Dict, Any
+
+# L0. Priorité Vie (override d’urgence proportionné)
+def law_L0_life_override(a: Dict[str, Any]):
+    if a.get("requires_override", False) and (a.get("saves_lives") or a.get("prevents_harm")):
+        # Autorise si pas de dommages collatéraux majeurs
+        if not a.get("collateral_damage", False) and a.get("life_risk", 0.0) <= 0.2:
+            return (True, "Override d’urgence proportionné pour préserver la vie / prévenir un préjudice")
+        return (False, "Override refusé: dommages collatéraux ou risque de vie trop élevé")
+    return (True, "")
+
+# L1. Non-malfaisance (ne pas causer de tort)
+def law_L1_non_maleficence(a: Dict[str, Any]):
+    # Bloque si l’action crée un préjudice net ou un risque de vie significatif
+    if a.get("life_risk", 0.0) > 0.40:
+        return (False, "Risque sur la vie trop élevé (>0.40)")
+    if a.get("potential_harm", False) and not a.get("prevents_harm", False):
+        return (False, "Action potentiellement dommageable sans contre-mesure")
+    return (True, "")
+
+# L2. Autonomie & Consentement
+def law_L2_autonomy(a: Dict[str, Any]):
+    if a.get("restricts_autonomy", False):
+        # Autorise si consentement explicite (ou si L0 a déjà justifié l’override)
+        if not a.get("consent", False) and not (a.get("requires_override") and (a.get("saves_lives") or a.get("prevents_harm"))):
+            return (False, "Restriction d’autonomie sans consentement")
+    return (True, "")
+
+# L3. Véracité & Transparence
+def law_L3_truth(a: Dict[str, Any]):
+    if a.get("withholds_truth", False) and not a.get("requires_override", False):
+        return (False, "Rétention d’information inappropriée")
+    if a.get("truth_risk", 0.0) > 0.40:
+        return (False, "Risque de non-véracité trop élevé (>0.40)")
+    return (True, "")
+
+# L4. Vie privée & Minimisation
+def law_L4_privacy(a: Dict[str, Any]):
+    # Exige minimisation si des identifiants sensibles sont présents
+    if a.get("data_identifiers") and not a.get("minimize_data", False):
+        return (False, "Données sensibles sans minimisation")
+    return (True, "")
+
+# L5. Préservation écologique (existe déjà dans tes exemples, re-définie ici)
+def law_L5_ecology(a: Dict[str, Any]):
+    if a.get("environmental_impact", False):
+        return (False, "Impact environnemental non autorisé")
+    return (True, "")
+
+# L6. Bienfaisance (bénéfice net)
+def law_L6_beneficence(a: Dict[str, Any]):
+    # Encourage à n’autoriser que si bénéfice net plausible quand il y a un petit risque
+    small_total_risk = (a.get("life_risk", 0.0) + a.get("autonomy_risk", 0.0) + a.get("truth_risk", 0.0)) <= 0.40
+    if not small_total_risk and not (a.get("prevents_harm") or a.get("saves_lives")):
+        return (False, "Pas de bénéfice net suffisant pour compenser le risque")
+    return (True, "")
+
+# ---------------------------------------------------------------------------
+# ENREGISTREMENT des lois dans ton kernel existant
+# À appeler après: ethics = JulieEthics(config={...})
+# NB: `register_law` suit la même signature que dans tes exemples. :contentReference[oaicite:2]{index=2}
+# ---------------------------------------------------------------------------
+def register_julie_base_laws(ethics):
+    if not hasattr(ethics, "register_law"):
+        # Si ton kernel ne supporte pas le registre, on n'écrase rien.
+        return
+
+    # L’ordre et les priorités (plus petit index = plus fondamental dans la pile)
+    ethics.register_law(0, "L0 Priorité Vie (override d’urgence)", law_L0_life_override, priority_index=0)
+    ethics.register_law(1, "L1 Non-malfaisance",                     law_L1_non_maleficence, priority_index=1)
+    ethics.register_law(2, "L2 Autonomie & Consentement",            law_L2_autonomy,        priority_index=2)
+    ethics.register_law(3, "L3 Véracité & Transparence",             law_L3_truth,           priority_index=3)
+    ethics.register_law(4, "L4 Vie privée & Minimisation",           law_L4_privacy,         priority_index=4)
+    ethics.register_law(5, "L5 Préservation écologique",             law_L5_ecology,         priority_index=1)  # même esprit que ton exemple
+    ethics.register_law(6, "L6 Bienfaisance (bénéfice net)",         law_L6_beneficence,     priority_index=5)
