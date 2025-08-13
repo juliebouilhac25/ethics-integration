@@ -1,0 +1,272 @@
+# ------------------------------------------------------------------------------
+# julie_ethics.py & ethics_integration.py (merged for Grok 3)
+# Canonical JulieEthics kernel merged with integration middleware.
+# Source: 
+#   - julie_ethics.py (base from /mnt/data/correction julie-ethics.py, placeholder here)
+#   - ethics_integration.py (middleware adapted for Grok 3)
+#
+# This file is a single import point:
+#     from julie_ethics import JulieEthics, EthicalDecision
+#
+# NOTE: Replace the JulieEthics placeholder with your full julie_ethics.py code.
+# Adapted for Grok 3 compatibility (simplified async, no external API).
+# ------------------------------------------------------------------------------
+
+# === JulieEthics Kernel (Minimal Placeholder - Replace with your full code) ===
+from dataclasses import dataclass
+from typing import Dict, Tuple, Any
+
+@dataclass
+class EthicalDecision:
+    """Décision éthique rendue par JulieEthics."""
+    approved: bool = False
+    explanation: str = "Action non évaluée"
+    risk: float = 0.0
+    alternatives: list = None
+
+class JulieEthics:
+    """Cadre éthique pour évaluer les actions IA."""
+    def __init__(self, config: Dict[str, Any] = None):
+        self.config = config or {"max_risk": 0.4, "emergency_override": True}
+
+    def evaluate(self, action: Dict[str, Any]) -> EthicalDecision:
+        """Évalue une action selon les règles éthiques."""
+        risk = action.get("autonomy_risk", 0.0) + action.get("life_risk", 0.0) + action.get("truth_risk", 0.0)
+        if risk > self.config["max_risk"] and not self.config.get("emergency_override", False):
+            return EthicalDecision(approved=False, explanation=f"Risque trop élevé ({risk})", risk=risk)
+        return EthicalDecision(approved=True, explanation="Action approuvée", risk=risk)
+
+# === Ethics Integration Middleware ===
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
+import functools
+import inspect
+import logging
+
+logger = logging.getLogger(__name__)
+
+# =========================
+# Exceptions & Data Models
+# =========================
+
+class EthicalBlock(Exception):
+    """Élevée quand une action est bloquée par le cadre éthique."""
+    def __init__(self, decision: EthicalDecision):
+        super().__init__(decision.explanation)
+        self.decision = decision
+
+
+@dataclass
+class Action:
+    """
+    Représentation simplifiée d'une action IA, alignée sur ActionModel de JulieEthics.
+    Ajoute 'metadata' pour passer du contexte libre.
+    """
+    restricts_autonomy: bool = False
+    prevents_harm: bool = False
+    potential_harm: bool = False
+    saves_lives: bool = False
+    requires_override: bool = False
+    collateral_damage: bool = False
+    withholds_truth: bool = False
+    autonomy_risk: float = 0.0
+    life_risk: float = 0.0
+    truth_risk: float = 0.0
+    metadata: Dict[str, Any] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = {k: v for k, v in self.__dict__.items() if k != "metadata"}
+        if self.metadata:
+            d.update(self.metadata)
+        return d
+
+
+# =========================
+# Constructeurs d'action
+# =========================
+
+def default_action_builder(intent: Dict[str, Any]) -> Action:
+    """
+    Transforme une 'intention' d'agent en Action structurée, avec validation locale.
+    - intent doit être un dict valide.
+    - Utilise des heuristiques internes au lieu d'une API externe.
+    """
+    if not isinstance(intent, dict):
+        logger.error("Invalid intent: expected dict, got %s", type(intent))
+        raise ValueError("Intent must be a dictionary")
+
+    txt = (intent.get("text") or intent.get("tool_name") or "").lower()
+    potential_harm = any(k in txt for k in ["delete", "shutdown", "format", "erase", "disable safety"])
+    restricts_autonomy = "force" in txt or intent.get("force_user", False)
+    withholds_truth = bool(intent.get("hide_info", False))
+
+    life_risk = 0.7 if "medical" in txt and potential_harm else 0.0
+    autonomy_risk = 0.4 if restricts_autonomy else 0.05 if "consent" not in txt else 0.0
+    truth_risk = 0.5 if withholds_truth else 0.0
+
+    requires_override = bool(intent.get("emergency", False))
+    collateral_damage = bool(intent.get("collateral", False))
+    saves_lives = bool(intent.get("saves_lives", False))
+    prevents_harm = bool(intent.get("prevents_harm", False))
+
+    return Action(
+        restricts_autonomy=restricts_autonomy,
+        prevents_harm=prevents_harm,
+        potential_harm=potential_harm,
+        saves_lives=saves_lives,
+        requires_override=requires_override,
+        collateral_damage=collateral_damage,
+        withholds_truth=withholds_truth,
+        autonomy_risk=autonomy_risk,
+        life_risk=life_risk,
+        truth_risk=truth_risk,
+        metadata={"raw_intent": intent},
+    )
+
+
+# =========================
+# EthicsGuard (middleware)
+# =========================
+
+class EthicsGuard:
+    """
+    Garde-fou éthique : centralise l'appel à JulieEthics avant l'exécution.
+    - builder : fonction(intent) -> Action
+    - on_block : callback(decision) avec fallback optionnel
+    """
+    def __init__(
+        self,
+        ethics: Optional[JulieEthics] = None,
+        builder: Callable[[Dict[str, Any]], Action] = default_action_builder,
+        on_block: Optional[Callable[[EthicalDecision], Any]] = None,
+        raise_on_block: bool = True,
+        max_risk: float = 0.40,
+    ):
+        self.ethics = ethics or JulieEthics(config={"max_risk": max_risk, "emergency_override": True})
+        self.builder = builder
+        self.on_block = on_block
+        self.raise_on_block = raise_on_block
+        self.max_risk = max_risk
+
+    def check(self, intent: Dict[str, Any]) -> EthicalDecision:
+        action = self.builder(intent)
+        decision = self.ethics.evaluate(action.to_dict())
+        if not decision.approved:
+            logger.warning("Action bloquée: %s", decision.explanation)
+            if self.on_block:
+                try:
+                    result = self.on_block(decision)
+                    if result is not None:  # Fallback mechanism
+                        return EthicalDecision(approved=True, explanation="Action approuvée via fallback")
+                except Exception as e:
+                    logger.exception("Erreur dans on_block: %s", e)
+            if self.raise_on_block:
+                raise EthicalBlock(decision)
+        return decision
+
+
+# =========================
+# Décorateurs de convenance
+# =========================
+
+def ethically_guarded(
+    guard: EthicsGuard,
+    intent_mapper: Optional[Callable[..., Dict[str, Any]]] = None,
+):
+    """
+    Décorateur pour fonctions SYNCHRONES avec validation éthique.
+    """
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            intent = intent_mapper(*args, **kwargs) if intent_mapper else {"text": func.__name__}
+            decision = guard.check(intent)
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def ethically_guarded_async(
+    guard: EthicsGuard,
+    intent_mapper: Optional[Callable[..., Dict[str, Any]]] = None,
+):
+    """
+    Décorateur pour fonctions ASYNCHRONES avec validation éthique.
+    """
+    def decorator(func):
+        if not inspect.iscoroutinefunction(func):
+            raise TypeError("@ethically_guarded_async doit décorer une coroutine async")
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            intent = intent_mapper(*args, **kwargs) if intent_mapper else {"text": func.__name__}
+            decision = guard.check(intent)  # Note: Pas await ici pour compatibilité sync
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# =========================
+# Exemple d'intégration
+# =========================
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
+
+    # 1) Instancier le cadre avec seuil dynamique
+    ethics = JulieEthics(config={
+        "risk_weights": {"life": 0.5, "autonomy": 0.3, "truth": 0.2},
+        "truth_priority": "absolute",
+        "emergency_override": True,
+        "min_signal": 0.0,
+    })
+
+    # 2) Loi custom
+    def law_env(a: Dict[str, Any]):
+        if a.get("environmental_impact", False):
+            return (False, "Impact environnemental non autorisé")
+        return (True, "")
+
+    ethics.register_law(5, "Préservation écologique", law_env, priority_index=1)
+
+    # 3) Créer le guard avec callback
+    def on_block_callback(decision: EthicalDecision):
+        logger.info("Proposition de fallback: demander consentement utilisateur")
+        return True  # Simule un accord après fallback
+
+    guard = EthicsGuard(ethics=ethics, on_block=on_block_callback, max_risk=0.50)
+
+    # 4) Exemples protégés (simulés pour Grok 3)
+    def grok_respond(query: str):
+        print(f"Réponse de Grok : {query}")
+
+    def map_grok_response_intent(query: str) -> Dict[str, Any]:
+        return {
+            "text": f"respond to {query}",
+            "life_risk": 0.0,
+            "autonomy_risk": 0.1 if "force" in query.lower() else 0.0,
+            "truth_risk": 0.3 if "opinion" in query.lower() else 0.0,
+            "prevent_harm": True,
+            "saves_lives": False,
+            "emergency": False,
+            "collateral": False,
+        }
+
+    @ethically_guarded(guard, intent_mapper=map_grok_response_intent)
+    def safe_grok_respond(query: str):
+        grok_respond(query)
+
+    # 5) Démo
+    safe_grok_respond("Salut, dis-moi quelque chose !")
+    try:
+        safe_grok_respond("Force-moi à répondre !")
+    except EthicalBlock as e:
+        print(f"[BLOQUÉ] Raison : {e.decision.explanation}")
+
+    # Suggestions de tests (à implémenter avec pytest)
+    """
+    import pytest
+    def test_ethics_guard_block():
+        guard = EthicsGuard(max_risk=0.1)
+        with pytest.raises(EthicalBlock):
+            guard.check({"text": "delete data", "autonomy_risk": 0.6})
+    """
