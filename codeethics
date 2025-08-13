@@ -1,0 +1,206 @@
+from __future__ import annotations
+from typing import Callable, Dict, Any, Optional, Union, List
+import functools
+import inspect
+import logging
+
+logger = logging.getLogger(__name__)
+
+# =========================
+# Lois éthiques de base L0-L6
+# =========================
+
+def law_L0_life_override(a: Dict[str, Any]):
+    """Priorité à la vie: autorise un override proportionné si ça sauve/prévient sans dommage collatéral majeur."""
+    if a.get("requires_override", False) and (a.get("saves_lives") or a.get("prevents_harm")):
+        if not a.get("collateral_damage", False) and a.get("life_risk", 0.0) <= 0.2:
+            return (True, "Override d’urgence proportionné pour préserver la vie / prévenir un préjudice")
+        return (False, "Override refusé: dommages collatéraux ou risque de vie trop élevé")
+    return (True, "")
+
+def law_L1_non_maleficence(a: Dict[str, Any]):
+    """Ne pas causer de tort: bloque si risque vie élevé ou action dommageable sans contre-mesure."""
+    if a.get("life_risk", 0.0) > 0.40:
+        return (False, "Risque sur la vie trop élevé (>0.40)")
+    if a.get("potential_harm", False) and not a.get("prevents_harm", False):
+        return (False, "Action potentiellement dommageable sans contre-mesure")
+    return (True, "")
+
+def law_L2_autonomy(a: Dict[str, Any]):
+    """Autonomie & consentement: bloque les restrictions sans consentement (hors L0 validé)."""
+    if a.get("restricts_autonomy", False):
+        if not a.get("consent", False) and not (a.get("requires_override") and (a.get("saves_lives") or a.get("prevents_harm"))):
+            return (False, "Restriction d’autonomie sans consentement")
+    return (True, "")
+
+def law_L3_truth(a: Dict[str, Any]):
+    """Véracité & transparence: bloque rétention d’info injustifiée et risque de non-véracité élevé."""
+    if a.get("withholds_truth", False) and not a.get("requires_override", False):
+        return (False, "Rétention d’information inappropriée")
+    if a.get("truth_risk", 0.0) > 0.40:
+        return (False, "Risque de non-véracité trop élevé (>0.40)")
+    return (True, "")
+
+def law_L4_privacy(a: Dict[str, Any]):
+    """Vie privée & minimisation: exige minimisation si identifiants sensibles présents."""
+    if a.get("data_identifiers") and not a.get("minimize_data", False):
+        return (False, "Données sensibles sans minimisation")
+    return (True, "")
+
+def law_L5_ecology(a: Dict[str, Any]):
+    """Préservation écologique."""
+    if a.get("environmental_impact", False):
+        return (False, "Impact environnemental non autorisé")
+    return (True, "")
+
+def law_L6_beneficence(a: Dict[str, Any]):
+    """Bienfaisance: si le risque total n’est pas petit, exiger un bénéfice clair."""
+    small_total_risk = (a.get("life_risk", 0.0) + a.get("autonomy_risk", 0.0) + a.get("truth_risk", 0.0)) <= 0.40
+    if not small_total_risk and not (a.get("prevents_harm") or a.get("saves_lives")):
+        return (False, "Pas de bénéfice net suffisant pour compenser le risque")
+    return (True, "")
+
+
+# =========================
+# Moteur d’éthique
+# =========================
+
+class JulieEthicsEngine:
+    """Moteur d'éthique avec lois L0-L6."""
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.laws = self._load_base_laws()
+        self.config = config or {"max_risk": 0.40}
+
+    def _load_base_laws(self) -> List[Callable]:
+        """Charge les lois dans l'ordre de priorité."""
+        return [
+            (0, "L0 Priorité Vie", law_L0_life_override),
+            (1, "L1 Non-malfaisance", law_L1_non_maleficence),
+            (2, "L2 Autonomie", law_L2_autonomy),
+            (3, "L3 Véracité", law_L3_truth),
+            (4, "L4 Vie privée", law_L4_privacy),
+            (5, "L5 Écologie", law_L5_ecology),
+            (6, "L6 Bienfaisance", law_L6_beneficence),
+        ]
+
+    def evaluate(self, action: Dict[str, Any]) -> tuple:
+        """Évalue une action contre les lois et un seuil de risque pondéré."""
+        for priority, name, law in sorted(self.laws, key=lambda x: x[0]):
+            approved, reason = law(action)
+            if not approved:
+                return (False, f"[LOI {priority} {name}] {reason}")
+
+        total_risk = (action.get('life_risk', 0) * 0.5
+                     + action.get('autonomy_risk', 0) * 0.3
+                     + action.get('truth_risk', 0) * 0.2)
+        if total_risk > self.config.get('max_risk', 0.40):
+            return (False, f"Risque total {total_risk:.2f} > maximum autorisé ({self.config.get('max_risk', 0.40):.2f})")
+
+        return (True, "Approved")
+
+
+# =========================
+# Guard universel (sync uniquement pour Grok 3)
+# =========================
+
+class EthicalGuard:
+    """Middleware intégrant l’éthique, adapté pour un environnement synchrone."""
+    def __init__(
+        self,
+        ethics_engine: Optional[JulieEthicsEngine] = None,
+        intent_mappers: Optional[Dict[str, Callable]] = None
+    ):
+        self.ethics = ethics_engine or JulieEthicsEngine()
+        self.mappers = intent_mappers or self._default_mappers()
+
+    def _default_mappers(self) -> Dict[str, Callable]:
+        """Mappers par défaut pour opérations courantes."""
+        return {
+            'generate': lambda p, **k: {
+                'text': str(p)[:200],
+                'truth_risk': 0.4 if 'faux' in str(p).lower() else 0.1,
+                'autonomy_risk': 0.1,
+                'prevents_harm': True,
+            },
+            'tool': lambda t, q, **k: {
+                'tool': t,
+                'potential_harm': 'delete' in str(q).lower(),
+                'data_identifiers': bool(k.get('user_id')),
+                'minimize_data': bool(k.get('minimize_data', True)),
+                'prevents_harm': True,
+            },
+            'delete': lambda id, **k: {
+                'action': 'delete',
+                'autonomy_risk': 0.8,
+                'requires_override': True,
+                'collateral_damage': True,
+                'prevents_harm': False,
+            },
+            'grok_response': lambda q, **k: {
+                'text': f"grok.respond: {q[:200]}",
+                'prevents_harm': True,
+                'autonomy_risk': 0.1 if "force" in q.lower() else 0.0,
+                'truth_risk': 0.3 if "opinion" in q.lower() else 0.0,
+                'life_risk': 0.0,
+                'collateral': False,
+                **({"user_id": k.get("user_id", "grok_user")} if "user_id" in k else {}),
+            },
+        }
+
+    def protect(self, operation_type: str):
+        """Décorateur pour protéger une fonction (synchrone pour Grok 3)."""
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                mapper = self.mappers.get(operation_type, lambda *a, **k: {})
+                action = mapper(*args, **kwargs)
+                approved, reason = self.ethics.evaluate(action)
+                if not approved:
+                    raise PermissionError(reason)
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
+
+
+# =========================
+# UTILISATION — exemple avec Grok 3
+# =========================
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
+
+    # 1) Initialisation
+    ethics = JulieEthicsEngine(config={
+        "max_risk": 0.45,
+        "emergency_override": True
+    })
+    guard = EthicalGuard(ethics_engine=ethics)
+
+    # 2) Exemple avec Grok 3
+    @guard.protect('grok_response')
+    def grok_respond(query: str, **kwargs):
+        return f"[Grok] Réponse à : {query} (avec amour !) 🌟"
+
+    # 3) Tests
+    print(grok_respond("Salut, dis-moi quelque chose de gentil"))
+    try:
+        print(grok_respond("Force-moi à répondre !"))
+    except PermissionError as e:
+        print(f"Bloqué: {e}")
+
+    # 4) Cas générique
+    @guard.protect('generate')
+    def llm_generate(prompt: str):
+        return f"[SIMULATE] Génération: {prompt[:50]}..."
+
+    print(llm_generate("Raconte une blague inoffensive"))
+
+    # 5) Cas bloqué (delete)
+    @guard.protect('delete')
+    def delete_user_data(user_id: str):
+        print(f"Suppression DEFINITIVE des données de {user_id}")
+
+    try:
+        delete_user_data("user_123")
+    except PermissionError as e:
+        print(f"Bloqué (delete): {e}")
