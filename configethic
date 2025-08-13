@@ -1,0 +1,8 @@
+ethics = JulieEthics(config={
+    "max_risk": 0.40,
+    "risk_weights": {"life": 0.5, "autonomy": 0.3, "truth": 0.2},
+    "truth_priority": "absolute",
+    "emergency_override": True,
+    "min_signal": 0.0,
+})
+register_julie_base_laws(ethics)
