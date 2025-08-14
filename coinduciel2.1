@@ -1,0 +1,14 @@
+from coinduciel_plugin import PluginManager, DurablePeacePlugin
+
+pm = PluginManager()
+pm.load_from_default(["coinduciel_plugin:DurablePeacePlugin"])  # 1 plugin, 1 fichier
+
+@pm.wrap
+def do_something(action=None, context=None):
+    # ta logique métier retourne une Action (dict)
+    return {"status": "done", "action": action}
+
+print(do_something(
+    action={"type": "weapon_launch", "harm": 1, "conflict": 1},
+    context={"global_stress_level": 0.7}
+))
