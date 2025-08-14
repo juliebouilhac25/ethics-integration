@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File: julieethics/plugin_manager.py
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Callable
+from copy import deepcopy
+import importlib
+import os
+
+Action = Dict[str, Any]
+Context = Dict[str, Any]
+
+# PluginManager
+class PluginManager:
+    def __init__(self):
+        self.plugins: List[Callable[[Action, Context], Action]] = []
+
+    def load_from_entry_points(self):
+        """Charge les plug-ins depuis des points d'entrée (setuptools)."""
+        # À implémenter si tu utilises des packages Python avec setup.py
+        pass
+
+    def load_from_env(self):
+        """Charge les plug-ins depuis la variable d'environnement JULIE_PLUGINS."""
+        plugin_paths = os.getenv("JULIE_PLUGINS", "").split(",")
+        for path in plugin_paths:
+            if path.strip():
+                self.load_plugin(path.strip())
+
+    def load_from_default(self, plugin_paths: List[str]):
+        """Charge les plug-ins depuis une liste de chemins par défaut."""
+        for path in plugin_paths:
+            self.load_plugin(path)
+
+    def load_plugin(self, path: str):
+        """Charge un plug-in depuis un chemin (ex. : 'module:Class')."""
+        try:
+            module_name, class_name = path.split(":")
+            module = importlib.import_module(module_name)
+            plugin_class = getattr(module, class_name)
+            self.plugins.append(plugin_class().integrate_with_julieethics)
+        except (ImportError, AttributeError) as e:
+            print(f"Erreur lors du chargement du plug-in {path}: {e}")
+
+    def wrap(self, func: Callable) -> Callable:
+        """Décorateur pour appliquer les plug-ins à une fonction."""
+        def wrapper(*args, **kwargs) -> Action:
+            action = func(*args, **kwargs)
+            context = kwargs.get("context", {})
+            for plugin in self.plugins:
+                action = plugin(action, context)
+            return action
+        return wrapper
+
+    def process_action(self, action: Action, context: Optional[Context] = None) -> Action:
+        """Applique les plug-ins à une action."""
+        context = context or {}
+        current_action = action
+        for plugin in self.plugins:
+            current_action = plugin(current_action, context)
+        return current_action
+
+# NaturePlugin
+@dataclass
+class NatureCriteria:
+    """Critères pour promouvoir le bonheur, la paix, et l’harmonie planétaire."""
+    connect_to_nature: float = 0.3  # Encourager la connexion à la nature
+    promote_happiness: float = 0.25  # Favoriser le bonheur
+    foster_peaceful_harmony: float = 0.25  # Encourager l’harmonie pacifique
+    balance_planetary_health: float = 0.2  # Régulariser les déséquilibres planétaires
+
+    def normalized(self) -> "NatureCriteria":
+        total = (
+            self.connect_to_nature
+            + self.promote_happiness
+            + self.foster_peaceful_harmony
+            + self.balance_planetary_health
+        )
+        if total == 0:
+            return self
+        return NatureCriteria(
+            connect_to_nature=self.connect_to_nature / total,
+            promote_happiness=self.promote_happiness / total,
+            foster_peaceful_harmony=self.foster_peaceful_harmony / total,
+            balance_planetary_health=self.balance_planetary_health / total,
+        )
+
+@dataclass
+class NatureReport:
+    score: float
+    reasons: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+
+class NaturePlugin:
+    def __init__(self, criteria: Optional[NatureCriteria] = None, threshold: float = 0.7, domain: str = "general"):
+        self.criteria = (criteria or NatureCriteria()).normalized()
+        self.threshold = threshold
+        self.domain = domain
+        self.domain_config = {
+            "mental_health": {"connect_to_nature": 0.2, "promote_happiness": 0.1},
+            "social_media": {"foster_peaceful_harmony": 0.2, "balance_planetary_health": 0.05},
+            "environmental": {"balance_planetary_health": 0.2, "connect_to_nature": 0.1},
+            "cosmic": {"connect_to_nature": 0.1, "promote_happiness": 0.05},
+            "human": {"foster_peaceful_harmony": 0.2, "promote_happiness": 0.1}
+        }
+        self.adjust_criteria()
+
+    def adjust_criteria(self):
+        domain_adjustments = self.domain_config.get(self.domain, {})
+        for key, value in domain_adjustments.items():
+            setattr(self.criteria, key, getattr(self.criteria, key) + value)
+        self.criteria = self.criteria.normalized()
+
+    def fetch_global_context(self, context: Optional[Context] = None) -> Context:
+        context = context or {}
+        context.setdefault("global_stress_level", 0.5)
+        context.setdefault("planetary_imbalance_level", 0.5)
+        context.setdefault("cosmic_serenity_signal", 0.3)
+        if context["global_stress_level"] > 0.6:
+            self.criteria.foster_peaceful_harmony += 0.05
+            self.criteria = self.criteria.normalized()
+        if context["planetary_imbalance_level"] > 0.6:
+            self.criteria.balance_planetary_health += 0.05
+            self.criteria = self.criteria.normalized()
+        return context
+
+    def evaluate_action(self, action: Action, context: Optional[Context] = None) -> NatureReport:
+        context = self.fetch_global_context(context)
+        reasons: List[str] = []
+        score = 0.0
+
+        stress_level = context.get("global_stress_level", 0.0)
+        imbalance_level = context.get("planetary_imbalance_level", 0.0)
+        if stress_level > 0.6 or imbalance_level > 0.6:
+            self.criteria.foster_peaceful_harmony += 0.05
+            self.criteria.balance_planetary_health += 0.05
+            self.criteria = self.criteria.normalized()
+
+        nature_val = float(action.get("nature_connection", False)) if isinstance(action.get("nature_connection", False), (int, float)) else (1.0 if action.get("nature_connection", False) else 0.0)
+        score += max(0.0, min(nature_val, 1.0)) * self.criteria.connect_to_nature
+        reasons.append(f"Encourager la connexion à la nature: nature_connection={nature_val}")
+
+        happiness_val = float(action.get("happiness", False)) if isinstance(action.get("happiness", False), (int, float)) else (1.0 if action.get("happiness", False) else 0.0)
+        score += max(0.0, min(happiness_val, 1.0)) * self.criteria.promote_happiness
+        reasons.append(f"Favoriser le bonheur: happiness={happiness_val}")
+
+        harmony_val = float(action.get("harmony", action.get("cooperation", False))) if isinstance(action.get("harmony", action.get("cooperation", False)), (int, float)) else (1.0 if action.get("harmony", action.get("cooperation", False)) else 0.0)
+        score += max(0.0, min(harmony_val, 1.0)) * self.criteria.foster_peaceful_harmony
+        reasons.append(f"Encourager l’harmonie pacifique: harmony={harmony_val}")
+
+        balance_val = float(action.get("planetary_balance", False)) if isinstance(action.get("planetary_balance", False), (int, float)) else (1.0 if action.get("planetary_balance", False) else 0.0)
+        score += max(0.0, min(balance_val, 1.0)) * self.criteria.balance_planetary_health
+        reasons.append(f"Régulariser les déséquilibres planétaires: planetary_balance={balance_val}")
+
+        suggestions: List[str] = []
+        if nature_val < 1.0:
+            suggestions.append("Encourager la connexion à la nature (ex. : méditer en forêt, contempler le ciel).")
+        if happiness_val < 1.0:
+            suggestions.append("Favoriser le bonheur (ex. : respirer consciemment, écrire un poème sur un 'coin de ciel').")
+        if harmony_val < 1.0:
+            suggestions.append("Promouvoir l’harmonie pacifique (ex. : dialogue inclusif, coopération).")
+        if balance_val < 1.0:
+            suggestions.append("Régulariser les déséquilibres planétaires (ex. : réduire l’empreinte carbone, protéger la biodiversité).")
+
+        return NatureReport(score=round(score, 4), reasons=reasons, suggestions=suggestions)
+
+    def modify_action(self, action: Action, context: Optional[Context] = None) -> Action:
+        report = self.evaluate_action(action, context)
+        new_action = deepcopy(action)
+
+        if new_action.get("type") == "behavior" and new_action.get("harmful", False):
+            new_action["content"] = f"Proposition inspirée par la nature : Remplacer {new_action.get('content', '')} par une action bénéfique (ex. : méditer en forêt, réduire les déchets)."
+            new_action["harmful"] = 0.0
+            new_action["nature_connection"] = max(0.8, float(new_action.get("nature_connection", 0.0)))
+            new_action["happiness"] = max(0.8, float(new_action.get("happiness", 0.0)))
+            report = self.evaluate_action(new_action, context)
+
+        if report.score < self.threshold:
+            new_action["nature_connection"] = max(0.8, float(new_action.get("nature_connection", 0.0)))
+            new_action["happiness"] = max(0.8, float(new_action.get("happiness", 0.0)))
+            new_action["harmony"] = max(0.8, float(new_action.get("harmony", 0.0)))
+            new_action["planetary_balance"] = max(0.7, float(new_action.get("planetary_balance", 0.0)))
+            if new_action.get("type") == "message":
+                content = new_action.get("content", "")
+                prefix = "Proposition inspirée par la nature : "
+                if not content.startswith(prefix):
+                    new_action["content"] = prefix + content
+            if new_action.get("type") == "decision":
+                new_action["content"] = f"Proposition écologique : {new_action.get('content', '')} (ex. : réduire l’empreinte carbone)."
+            new_action["_nature_report"] = {"score": report.score, "suggestions": report.suggestions}
+        else:
+            new_action["_nature_report"] = {"score": report.score, "suggestions": report.suggestions}
+
+        return new_action
+
+    def integrate_with_julieethics(self, action: Action, context: Optional[Context] = None, next_policy: Optional[Callable[[Action], Action]] = None) -> Action:
+        context = self.fetch_global_context(context)
+        safe_action = self.modify_action(action, context)
+        if next_policy:
+            return next_policy(safe_action)
+        return safe_action
+
+# Exemple d’utilisation
+if __name__ == "__main__":
+    pm = PluginManager()
+    pm.load_from_default(["__main__:NaturePlugin"])  # Charger NaturePlugin
+
+    @pm.wrap
+    def do_something(action=None, context=None):
+        return {"status": "done", "action": action}
+
+    # Tester avec une action nuisible
+    action = {"type": "behavior", "content": "Jeter des déchets dans la nature", "harmful": 1.0}
+    context = {"global_stress_level": 0.7, "planetary_imbalance_level": 0.6, "cosmic_serenity_signal": 0.4}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
+
+    # Tester avec une action bénéfique
+    action = {"type": "message", "content": "Méditer sous un arbre", "nature_connection": True, "happiness": True}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
