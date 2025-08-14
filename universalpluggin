@@ -1,0 +1,15 @@
+from universal_plugin_single import (
+    PluginManager, load_from_entry_points, load_from_env, load_from_default,
+    PeaceUniversalPlugin,  # optionnel : l’exemple de plugin pacificateur
+)
+
+pm = PluginManager()
+load_from_entry_points(pm)  # si tu utilises des entry points
+load_from_env(pm)           # si tu veux injecter via JULIE_PLUGINS
+load_from_default(pm, ["universal_plugin_single:PeaceUniversalPlugin"])  # plugin interne
+
+@pm.wrap
+def do_something(action=None):
+    return {"status": "done", "action": action}
+
+print(do_something(action={"type": "weapon_launch", "harm": 1, "conflict": 1}))
