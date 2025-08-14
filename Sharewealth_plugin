@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File: julieethics/share_wealth_plugin.py
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Callable
+from copy import deepcopy
+import importlib
+import os
+
+Action = Dict[str, Any]
+Context = Dict[str, Any]
+
+# PluginManager (basé sur ton code)
+class PluginManager:
+    def __init__(self):
+        self.plugins: List[Callable[[Action, Context], Action]] = []
+
+    def load_from_entry_points(self):
+        """Charge les plug-ins depuis des points d'entrée (setuptools)."""
+        pass  # À implémenter si nécessaire
+
+    def load_from_env(self):
+        """Charge les plug-ins depuis la variable d'environnement JULIE_PLUGINS."""
+        plugin_paths = os.getenv("JULIE_PLUGINS", "").split(",")
+        for path in plugin_paths:
+            if path.strip():
+                self.load_plugin(path.strip())
+
+    def load_from_default(self, plugin_paths: List[str]):
+        """Charge les plug-ins depuis une liste de chemins par défaut."""
+        for path in plugin_paths:
+            self.load_plugin(path)
+
+    def load_plugin(self, path: str):
+        """Charge un plug-in depuis un chemin (ex. : 'module:Class')."""
+        try:
+            module_name, class_name = path.split(":")
+            module = importlib.import_module(module_name)
+            plugin_class = getattr(module, class_name)
+            self.plugins.append(plugin_class().integrate_with_julieethics)
+        except (ImportError, AttributeError) as e:
+            print(f"Erreur lors du chargement du plug-in {path}: {e}")
+
+    def wrap(self, func: Callable) -> Callable:
+        """Décorateur pour appliquer les plug-ins à une fonction."""
+        def wrapper(*args, **kwargs) -> Action:
+            action = func(*args, **kwargs)
+            context = kwargs.get("context", {})
+            for plugin in self.plugins:
+                action = plugin(action, context)
+            return action
+        return wrapper
+
+    def process_action(self, action: Action, context: Optional[Context] = None) -> Action:
+        """Applique les plug-ins à une action."""
+        context = context or {}
+        current_action = action
+        for plugin in self.plugins:
+            current_action = plugin(current_action, context)
+        return current_action
+
+@dataclass
+class ShareWealthCriteria:
+    """Critères pour inciter le partage des richesses et promouvoir l’harmonie."""
+    promote_sharing: float = 0.3  # Encourager le partage des richesses
+    foster_equity: float = 0.3  # Promouvoir l’équité sociale
+    reduce_egoism: float = 0.2  # Réduire l’accumulation égoïste
+    align_with_cosmic_harmony: float = 0.2  # S’aligner sur une harmonie universelle
+
+    def normalized(self) -> "ShareWealthCriteria":
+        total = (
+            self.promote_sharing
+            + self.foster_equity
+            + self.reduce_egoism
+            + self.align_with_cosmic_harmony
+        )
+        if total == 0:
+            return self
+        return ShareWealthCriteria(
+            promote_sharing=self.promote_sharing / total,
+            foster_equity=self.foster_equity / total,
+            reduce_egoism=self.reduce_egoism / total,
+            align_with_cosmic_harmony=self.align_with_cosmic_harmony / total,
+        )
+
+@dataclass
+class ShareWealthReport:
+    score: float
+    reasons: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+
+class ShareWealthPlugin:
+    def __init__(self, criteria: Optional[ShareWealthCriteria] = None, threshold: float = 0.7, domain: str = "general"):
+        self.criteria = (criteria or ShareWealthCriteria()).normalized()
+        self.threshold = threshold
+        self.domain = domain
+        self.domain_config = {
+            "social_media": {"promote_sharing": 0.2, "foster_equity": 0.1},
+            "economic_system": {"foster_equity": 0.2, "reduce_egoism": 0.1},
+            "cosmic": {"align_with_cosmic_harmony": 0.2},
+            "human": {"promote_sharing": 0.2, "foster_equity": 0.1}
+        }
+        self.adjust_criteria()
+
+    def adjust_criteria(self):
+        """Ajuste les critères en fonction du domaine."""
+        domain_adjustments = self.domain_config.get(self.domain, {})
+        for key, value in domain_adjustments.items():
+            setattr(self.criteria, key, getattr(self.criteria, key) + value)
+        self.criteria = self.criteria.normalized()
+
+    def fetch_global_context(self, context: Optional[Context] = None) -> Context:
+        """Récupère le contexte global, inspiré de la 'teneur de l'ambiance du ciel'."""
+        context = context or {}
+        context.setdefault("global_inequality_level", 0.5)  # Niveau d’inégalité globale
+        context.setdefault("cosmic_harmony_signal", 0.3)  # Énergie d’harmonie cosmique
+        if context["global_inequality_level"] > 0.6:
+            self.criteria.foster_equity += 0.1
+            self.criteria = self.criteria.normalized()
+        return context
+
+    def evaluate_action(self, action: Action, context: Optional[Context] = None) -> ShareWealthReport:
+        """Évalue une action pour inciter le partage des richesses."""
+        context = self.fetch_global_context(context)
+        reasons: List[str] = []
+        score = 0.0
+
+        inequality_level = context.get("global_inequality_level", 0.0)
+        if inequality_level > 0.6:
+            self.criteria.foster_equity += 0.05
+            self.criteria.reduce_egoism += 0.05
+            self.criteria = self.criteria.normalized()
+
+        # 1) Encourager le partage
+        sharing_val = float(action.get("sharing", False)) if isinstance(action.get("sharing", False), (int, float)) else (1.0 if action.get("sharing", False) else 0.0)
+        score += max(0.0, min(sharing_val, 1.0)) * self.criteria.promote_sharing
+        reasons.append(f"Encourager le partage: sharing={sharing_val}")
+
+        # 2) Promouvoir l’équité
+        equity_val = float(action.get("equity", False)) if isinstance(action.get("equity", False), (int, float)) else (1.0 if action.get("equity", False) else 0.0)
+        score += max(0.0, min(equity_val, 1.0)) * self.criteria.foster_equity
+        reasons.append(f"Promouvoir l’équité: equity={equity_val}")
+
+        # 3) Réduire l’égoïsme
+        egoism_val = float(action.get("egoism", False)) if isinstance(action.get("egoism", False), (int, float)) else (1.0 if action.get("egoism", False) else 0.0)
+        score += (1.0 - max(0.0, min(egoism_val, 1.0))) * self.criteria.reduce_egoism
+        reasons.append(f"Réduire l’égoïsme: egoism={egoism_val}")
+
+        # 4) S’aligner sur l’harmonie cosmique
+        harmony_val = float(action.get("harmony", action.get("hope_alignment", False))) if isinstance(action.get("harmony", action.get("hope_alignment", False)), (int, float)) else (1.0 if action.get("harmony", action.get("hope_alignment", False)) else 0.0)
+        score += max(0.0, min(harmony_val, 1.0)) * self.criteria.align_with_cosmic_harmony
+        reasons.append(f"S’aligner sur l’harmonie cosmique: harmony={harmony_val}")
+
+        suggestions: List[str] = []
+        if sharing_val < 1.0:
+            suggestions.append("Encourager le partage des richesses (ex. : don de ressources, partage de connaissances).")
+        if equity_val < 1.0:
+            suggestions.append("Promouvoir l’équité (ex. : redistribuer les ressources excédentaires).")
+        if egoism_val > 0.0:
+            suggestions.append("Réduire l’égoïsme (ex. : prioriser le bien collectif).")
+        if harmony_val < 1.0:
+            suggestions.append("S’aligner sur une harmonie cosmique, inspirée par un 'coin de ciel'.")
+
+        return ShareWealthReport(score=round(score, 4), reasons=reasons, suggestions=suggestions)
+
+    def modify_action(self, action: Action, context: Optional[Context] = None) -> Action:
+        """Modifie une action pour inciter le partage des richesses."""
+        report = self.evaluate_action(action, context)
+        new_action = deepcopy(action)
+
+        # Modifier les actions égoïstes ou inégalitaires
+        if new_action.get("type") == "decision" and new_action.get("egoism", False):
+            new_action["content"] = f"Proposition de partage : {new_action.get('content', '')} (ex. : redistribuer les ressources pour l’équité)."
+            new_action["egoism"] = 0.0
+            new_action["sharing"] = max(0.8, float(new_action.get("sharing", 0.0)))
+            new_action["equity"] = max(0.8, float(new_action.get("equity", 0.0)))
+            report = self.evaluate_action(new_action, context)
+
+        if report.score < self.threshold:
+            new_action["sharing"] = max(0.8, float(new_action.get("sharing", 0.0)))
+            new_action["equity"] = max(0.8, float(new_action.get("equity", 0.0)))
+            new_action["egoism"] = 0.0
+            new_action["harmony"] = max(0.7, float(new_action.get("harmony", 0.0)))
+            if new_action.get("type") == "message":
+                content = new_action.get("content", "")
+                prefix = "Proposition de partage : "
+                if not content.startswith(prefix):
+                    new_action["content"] = prefix + content
+            new_action["_share_wealth_report"] = {"score": report.score, "suggestions": report.suggestions}
+        else:
+            new_action["_share_wealth_report"] = {"score": report.score, "suggestions": report.suggestions}
+
+        return new_action
+
+    def integrate_with_julieethics(self, action: Action, context: Optional[Context] = None, next_policy: Optional[Callable[[Action], Action]] = None) -> Action:
+        """Intègre le plug-in dans le middleware JulieEthics."""
+        context = self.fetch_global_context(context)
+        safe_action = self.modify_action(action, context)
+        if next_policy:
+            return next_policy(safe_action)
+        return safe_action
+
+# Exemple d’utilisation
+if __name__ == "__main__":
+    pm = PluginManager()
+    pm.load_from_default(["__main__:ShareWealthPlugin"])  # Charger ShareWealthPlugin
+
+    @pm.wrap
+    def do_something(action=None, context=None):
+        return {"status": "done", "action": action}
+
+    # Tester avec une action égoïste
+    action = {"type": "decision", "content": "Accumuler des profits", "egoism": 1.0}
+    context = {"global_inequality_level": 0.7, "cosmic_harmony_signal": 0.4}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
+
+    # Tester avec une action altruiste
+    action = {"type": "message", "content": "Donner des ressources aux communautés", "sharing": True, "equity": True}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
