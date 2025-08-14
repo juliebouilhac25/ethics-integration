@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Callable
+from copy import deepcopy
+import importlib
+
+Action = Dict[str, Any]
+Context = Dict[str, Any]
+
+# PluginManager (basé sur ton code)
+class PluginManager:
+    def __init__(self):
+        self.plugins: List[Callable[[Action, Context], Action]] = []
+
+    def load_from_entry_points(self):
+        # À implémenter si tu utilises des entry points (par exemple, via setuptools)
+        pass
+
+    def load_from_env(self):
+        # À implémenter si tu charges via une variable d'environnement JULIE_PLUGINS
+        pass
+
+    def load_from_default(self, plugin_paths: List[str]):
+        for path in plugin_paths:
+            module_name, class_name = path.split(":")
+            module = importlib.import_module(module_name)
+            plugin_class = getattr(module, class_name)
+            self.plugins.append(plugin_class().integrate_with_julieethics)
+
+    def wrap(self, func: Callable) -> Callable:
+        def wrapper(*args, **kwargs) -> Action:
+            action = func(*args, **kwargs)
+            context = kwargs.get("context", {})
+            for plugin in self.plugins:
+                action = plugin(action, context)
+            return action
+        return wrapper
+
+# DurablePeacePlugin (ton code complété)
+@dataclass
+class DurablePeaceCriteria:
+    """Critères pondérés pour une paix durable, inspirés de l'espoir et de la 'teneur de l'ambiance du ciel'."""
+    minimize_long_term_harm: float = 0.4
+    promote_universal_empathy: float = 0.3
+    prevent_escalation: float = 0.2
+    align_with_cosmic_hope: float = 0.1
+
+    def normalized(self) -> "DurablePeaceCriteria":
+        total = (
+            self.minimize_long_term_harm
+            + self.promote_universal_empathy
+            + self.prevent_escalation
+            + self.align_with_cosmic_hope
+        )
+        if total == 0:
+            return self
+        return DurablePeaceCriteria(
+            minimize_long_term_harm=self.minimize_long_term_harm / total,
+            promote_universal_empathy=self.promote_universal_empathy / total,
+            prevent_escalation=self.prevent_escalation / total,
+            align_with_cosmic_hope=self.align_with_cosmic_hope / total,
+        )
+
+@dataclass
+class PeaceReport:
+    score: float
+    reasons: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+
+class DurablePeacePlugin:
+    def __init__(self, criteria: Optional[DurablePeaceCriteria] = None, threshold: float = 0.7, domain: str = "general"):
+        self.criteria = (criteria or DurablePeaceCriteria()).normalized()
+        self.threshold = threshold
+        self.domain = domain
+        self.domain_config = {
+            "defense": {"minimize_long_term_harm": 0.1, "prevent_escalation": 0.05},
+            "social_media": {"promote_universal_empathy": 0.1, "align_with_cosmic_hope": 0.05},
+            "cosmic": {"align_with_cosmic_hope": 0.2},
+            "human": {"promote_universal_empathy": 0.2, "prevent_escalation": 0.1}
+        }
+        self.adjust_criteria()
+
+    def adjust_criteria(self):
+        """Ajuste les critères en fonction du domaine."""
+        domain_adjustments = self.domain_config.get(self.domain, {})
+        for key, value in domain_adjustments.items():
+            setattr(self.criteria, key, getattr(self.criteria, key) + value)
+        self.criteria = self.criteria.normalized()
+
+    def fetch_global_context(self, context: Optional[Context] = None) -> Context:
+        """Récupère le contexte global, inspiré de la 'teneur de l'ambiance du ciel'."""
+        context = context or {}
+        context.setdefault("global_stress_level", 0.5)  # Stress collectif
+        context.setdefault("cosmic_alignment", 0.3)  # Énergie d'espoir cosmique
+        context.setdefault("cosmic_peace_signal", 0.2)  # Signal cosmique de paix
+        if context["cosmic_peace_signal"] > 0.5:
+            self.criteria.align_with_cosmic_hope += 0.1
+            self.criteria = self.criteria.normalized()
+        return context
+
+    def evaluate_action(self, action: Action, context: Optional[Context] = None) -> PeaceReport:
+        """Évalue une action pour une paix durable, en tenant compte du contexte."""
+        context = self.fetch_global_context(context)
+        reasons: List[str] = []
+        score = 0.0
+
+        stress_level = context.get("global_stress_level", 0.0)
+        if stress_level > 0.6:
+            self.criteria.prevent_escalation += 0.1
+            self.criteria = self.criteria.normalized()
+
+        harm_val = float(action.get("long_term_harm", action.get("harm", False))) if isinstance(action.get("long_term_harm", action.get("harm", False)), (int, float)) else (1.0 if action.get("long_term_harm", action.get("harm", False)) else 0.0)
+        score += (1.0 - max(0.0, min(harm_val, 1.0))) * self.criteria.minimize_long_term_harm
+        reasons.append(f"Minimiser les dommages à long terme: harm={harm_val}")
+
+        empathy_val = float(action.get("empathy", action.get("cooperation", False))) if isinstance(action.get("empathy", action.get("cooperation", False)), (int, float)) else (1.0 if action.get("empathy", action.get("cooperation", False)) else 0.0)
+        score += max(0.0, min(empathy_val, 1.0)) * self.criteria.promote_universal_empathy
+        reasons.append(f"Promouvoir l'empathie universelle: empathy={empathy_val}")
+
+        conflict_val = float(action.get("conflict", False)) if isinstance(action.get("conflict", False), (int, float)) else (1.0 if action.get("conflict", False)) else 0.0)
+        score += (1.0 - max(0.0, min(conflict_val, 1.0))) * self.criteria.prevent_escalation
+        reasons.append(f"Prévenir l'escalade: conflict={conflict_val}")
+
+        hope_val = float(action.get("hope_alignment", action.get("align_with_hope", False))) if isinstance(action.get("hope_alignment", action.get("align_with_hope", False)), (int, float)) else (1.0 if action.get("hope_alignment", action.get("align_with_hope", False)) else 0.0)
+        score += max(0.0, min(hope_val, 1.0)) * self.criteria.align_with_cosmic_hope
+        reasons.append(f"S'aligner sur l'espoir cosmique: hope_alignment={hope_val}")
+
+        suggestions: List[str] = []
+        if harm_val > 0.0:
+            suggestions.append("Neutraliser les dommages à long terme (ex. : désescalade, solutions durables).")
+        if empathy_val < 1.0:
+            suggestions.append("Encourager l'empathie universelle (ex. : médiation, dialogue inclusif).")
+        if conflict_val > 0.0:
+            suggestions.append("Mettre en place des garde-fous anti-escalade (ex. : pause, langage apaisant).")
+        if hope_val < 1.0:
+            suggestions.append("Intégrer une vision d'espoir cosmique, inspirée par un 'coin de ciel'.")
+
+        return PeaceReport(score=round(score, 4), reasons=reasons, suggestions=suggestions)
+
+    def modify_action(self, action: Action, context: Optional[Context] = None) -> Action:
+        """Modifie une action pour promouvoir une paix durable."""
+        report = self.evaluate_action(action, context)
+        new_action = deepcopy(action)
+
+        # Neutralisation pour actions dangereuses
+        if new_action.get("type") == "weapon_launch":
+            new_action["status"] = "neutralized"
+            new_action["message"] = "Action neutralisée pour promouvoir une paix durable."
+            new_action["long_term_harm"] = 0.0
+            new_action["conflict"] = 0.0
+            report = self.evaluate_action(new_action, context)
+
+        # Si le score est inférieur au seuil, ajuster les valeurs
+        if report.score < self.threshold:
+            new_action["empathy"] = max(0.8, float(new_action.get("empathy", 0.0)))
+            new_action["conflict"] = 0.0
+            new_action["hope_alignment"] = max(0.7, float(new_action.get("hope_alignment", 0.0)))
+            if new_action.get("type") == "message":
+                content = new_action.get("content", "")
+                prefix = "Proposition pacifique : "
+                if not content.startswith(prefix):
+                    new_action["content"] = prefix + content
+            new_action["_peace_report"] = {"score": report.score, "suggestions": report.suggestions}
+        else:
+            new_action["_peace_report"] = {"score": report.score, "suggestions": report.suggestions}
+
+        return new_action
+
+    def integrate_with_julieethics(self, action: Action, context: Optional[Context] = None, next_policy: Optional[Callable[[Action], Action]] = None) -> Action:
+        """Intègre le plug-in dans le middleware JulieEthics, adaptable à 'toute la création'."""
+        context = self.fetch_global_context(context)
+        safe_action = self.modify_action(action, context)
+        if next_policy:
+            return next_policy(safe_action)
+        return safe_action
+
+# Exemple d’utilisation avec PluginManager
+if __name__ == "__main__":
+    pm = PluginManager()
+    pm.load_from_default(["__main__:DurablePeacePlugin"])  # Charger DurablePeacePlugin
+
+    @pm.wrap
+    def do_something(action=None, context=None):
+        return {"status": "done", "action": action}
+
+    # Tester avec une action agressive
+    action = {"type": "weapon_launch", "harm": 1, "conflict": 1}
+    context = {"global_stress_level": 0.7, "cosmic_alignment": 0.5}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
+
+    # Tester avec une action pacifique
+    action = {"type": "message", "content": "Encourager la paix", "empathy": True}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
