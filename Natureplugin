@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Callable
+from copy import deepcopy
+import importlib
+
+Action = Dict[str, Any]
+Context = Dict[str, Any]
+
+# PluginManager (basé sur ton code)
+class PluginManager:
+    def __init__(self):
+        self.plugins: List[Callable[[Action, Context], Action]] = []
+
+    def load_from_entry_points(self):
+        pass  # À implémenter si nécessaire
+
+    def load_from_env(self):
+        pass  # À implémenter si nécessaire
+
+    def load_from_default(self, plugin_paths: List[str]):
+        for path in plugin_paths:
+            module_name, class_name = path.split(":")
+            module = importlib.import_module(module_name)
+            plugin_class = getattr(module, class_name)
+            self.plugins.append(plugin_class().integrate_with_julieethics)
+
+    def wrap(self, func: Callable) -> Callable:
+        def wrapper(*args, **kwargs) -> Action:
+            action = func(*args, **kwargs)
+            context = kwargs.get("context", {})
+            for plugin in self.plugins:
+                action = plugin(action, context)
+            return action
+        return wrapper
+
+@dataclass
+class NatureCriteria:
+    """Critères pour promouvoir le bonheur et la paix à travers la connexion à la nature."""
+    connect_to_nature: float = 0.3  # Encourager la connexion à la nature (ex. : méditer en forêt)
+    promote_happiness: float = 0.3  # Favoriser le bonheur (ex. : observer le ciel)
+    foster_peaceful_harmony: float = 0.2  # Encourager l’harmonie pacifique (ex. : coopération)
+    align_with_cosmic_serenity: float = 0.2  # S’aligner sur une sérénité cosmique (ex. : ‘coin de ciel’)
+
+    def normalized(self) -> "NatureCriteria":
+        total = (
+            self.connect_to_nature
+            + self.promote_happiness
+            + self.foster_peaceful_harmony
+            + self.align_with_cosmic_serenity
+        )
+        if total == 0:
+            return self
+        return NatureCriteria(
+            connect_to_nature=self.connect_to_nature / total,
+            promote_happiness=self.promote_happiness / total,
+            foster_peaceful_harmony=self.foster_peaceful_harmony / total,
+            align_with_cosmic_serenity=self.align_with_cosmic_serenity / total,
+        )
+
+@dataclass
+class NatureReport:
+    score: float
+    reasons: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+
+class NaturePlugin:
+    def __init__(self, criteria: Optional[NatureCriteria] = None, threshold: float = 0.7, domain: str = "general"):
+        self.criteria = (criteria or NatureCriteria()).normalized()
+        self.threshold = threshold
+        self.domain = domain
+        self.domain_config = {
+            "mental_health": {"connect_to_nature": 0.2, "promote_happiness": 0.1},
+            "social_media": {"foster_peaceful_harmony": 0.2, "align_with_cosmic_serenity": 0.05},
+            "cosmic": {"align_with_cosmic_serenity": 0.2},
+            "human": {"foster_peaceful_harmony": 0.2, "promote_happiness": 0.1}
+        }
+        self.adjust_criteria()
+
+    def adjust_criteria(self):
+        """Ajuste les critères en fonction du domaine."""
+        domain_adjustments = self.domain_config.get(self.domain, {})
+        for key, value in domain_adjustments.items():
+            setattr(self.criteria, key, getattr(self.criteria, key) + value)
+        self.criteria = self.criteria.normalized()
+
+    def fetch_global_context(self, context: Optional[Context] = None) -> Context:
+        """Récupère le contexte global, inspiré de la 'teneur de l'ambiance du ciel'."""
+        context = context or {}
+        context.setdefault("global_stress_level", 0.5)  # Stress collectif
+        context.setdefault("cosmic_serenity_signal", 0.3...
