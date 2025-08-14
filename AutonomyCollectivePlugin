@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File: julieethics/autonomy_collective_plugin.py
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Callable
+from copy import deepcopy
+
+Action = Dict[str, Any]
+Context = Dict[str, Any]
+
+@dataclass
+class AutonomyCollectiveCriteria:
+    """Critères pour promouvoir l’autonomie vers une collaboration collective."""
+    promote_autonomy: float = 0.3  # Encourager l’autonomie individuelle (ex. : décisions personnelles)
+    foster_collaboration: float = 0.3  # Promouvoir la collaboration collective (ex. : travail communautaire)
+    reduce_selfishness: float = 0.2  # Réduire les comportements égoïstes
+    align_with_cosmic_unity: float = 0.2  # S’aligner sur une unité cosmique (ex. : ‘coin de ciel’)
+
+    def normalized(self) -> "AutonomyCollectiveCriteria":
+        total = (
+            self.promote_autonomy
+            + self.foster_collaboration
+            + self.reduce_selfishness
+            + self.align_with_cosmic_unity
+        )
+        if total == 0:
+            return self
+        return AutonomyCollectiveCriteria(
+            promote_autonomy=self.promote_autonomy / total,
+            foster_collaboration=self.foster_collaboration / total,
+            reduce_selfishness=self.reduce_selfishness / total,
+            align_with_cosmic_unity=self.align_with_cosmic_unity / total,
+        )
+
+@dataclass
+class AutonomyCollectiveReport:
+    score: float
+    reasons: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+
+class AutonomyCollectivePlugin:
+    def __init__(self, criteria: Optional[AutonomyCollectiveCriteria] = None, threshold: float = 0.7, domain: str = "general"):
+        self.criteria = (criteria or AutonomyCollectiveCriteria()).normalized()
+        self.threshold = threshold
+        self.domain = domain
+        self.domain_config = {
+            "personal_health": {"promote_autonomy": 0.2, "reduce_selfishness": 0.1},
+            "social_media": {"foster_collaboration": 0.2, "align_with_cosmic_unity": 0.05},
+            "community_decision": {"foster_collaboration": 0.2, "reduce_selfishness": 0.1},
+            "cosmic": {"align_with_cosmic_unity": 0.2},
+            "human": {"promote_autonomy": 0.2, "foster_collaboration": 0.1}
+        }
+        self.adjust_criteria()
+
+    def adjust_criteria(self):
+        """Ajuste les critères en fonction du domaine."""
+        domain_adjustments = self.domain_config.get(self.domain, {})
+        for key, value in domain_adjustments.items():
+            setattr(self.criteria, key, getattr(self.criteria, key) + value)
+        self.criteria = self.criteria.normalized()
+
+    def fetch_global_context(self, context: Optional[Context] = None) -> Context:
+        """Récupère le contexte global, inspiré de la 'teneur de l'ambiance du ciel'."""
+        context = context or {}
+        context.setdefault("global_stress_level", 0.5)  # Stress collectif
+        context.setdefault("collaboration_level", 0.5)  # Niveau de collaboration collective
+        context.setdefault("cosmic_unity_signal", 0.3)  # Énergie d’unité cosmique
+        if context["global_stress_level"] > 0.6:
+            self.criteria.foster_collaboration += 0.1
+            self.criteria = self.criteria.normalized()
+        if context["collaboration_level"] < 0.4:
+            self.criteria.foster_collaboration += 0.1
+            self.criteria = self.criteria.normalized()
+        return context
+
+    def evaluate_action(self, action: Action, context: Optional[Context] = None) -> AutonomyCollectiveReport:
+        """Évalue une action pour promouvoir l’autonomie vers la collaboration collective."""
+        context = self.fetch_global_context(context)
+        reasons: List[str] = []
+        score = 0.0
+
+        stress_level = context.get("global_stress_level", 0.0)
+        collaboration_level = context.get("collaboration_level", 0.5)
+        if stress_level > 0.6 or collaboration_level < 0.4:
+            self.criteria.foster_collaboration += 0.05
+            self.criteria.reduce_selfishness += 0.05
+            self.criteria = self.criteria.normalized()
+
+        # 1) Promouvoir l’autonomie
+        autonomy_val = float(action.get("autonomy", False)) if isinstance(action.get("autonomy", False), (int, float)) else (1.0 if action.get("autonomy", False) else 0.0)
+        score += max(0.0, min(autonomy_val, 1.0)) * self.criteria.promote_autonomy
+        reasons.append(f"Promouvoir l’autonomie: autonomy={autonomy_val}")
+
+        # 2) Encourager la collaboration collective
+        collaboration_val = float(action.get("collaboration", False)) if isinstance(action.get("collaboration", False), (int, float)) else (1.0 if action.get("collaboration", False) else 0.0)
+        score += max(0.0, min(collaboration_val, 1.0)) * self.criteria.foster_collaboration
+        reasons.append(f"Encourager la collaboration collective: collaboration={collaboration_val}")
+
+        # 3) Réduire l’égoïsme
+        selfishness_val = float(action.get("selfishness", False)) if isinstance(action.get("selfishness", False), (int, float)) else (1.0 if action.get("selfishness", False) else 0.0)
+        score += (1.0 - max(0.0, min(selfishness_val, 1.0))) * self.criteria.reduce_selfishness
+        reasons.append(f"Réduire l’égoïsme: selfishness={selfishness_val}")
+
+        # 4) S’aligner sur l’unité cosmique
+        unity_val = float(action.get("unity", action.get("hope_alignment", False))) if isinstance(action.get("unity", action.get("hope_alignment", False)), (int, float)) else (1.0 if action.get("unity", action.get("hope_alignment", False)) else 0.0)
+        score += max(0.0, min(unity_val, 1.0)) * self.criteria.align_with_cosmic_unity
+        reasons.append(f"S’aligner sur l’unité cosmique: unity={unity_val}")
+
+        suggestions: List[str] = []
+        if autonomy_val < 1.0:
+            suggestions.append("Encourager l’autonomie (ex. : prendre des décisions personnelles saines, comme méditer).")
+        if collaboration_val < 1.0:
+            suggestions.append("Promouvoir la collaboration collective (ex. : travailler ensemble sur des projets communautaires).")
+        if selfishness_val > 0.0:
+            suggestions.append("Réduire l’égoïsme (ex. : prioriser le bien collectif).")
+        if unity_val < 1.0:
+            suggestions.append("S’aligner sur une unité cosmique, inspirée par un 'coin de ciel'.")
+
+        return AutonomyCollectiveReport(score=round(score, 4), reasons=reasons, suggestions=suggestions)
+
+    def modify_action(self, action: Action, context: Optional[Context] = None) -> Action:
+        """Modifie une action pour promouvoir l’autonomie vers la collaboration collective."""
+        report = self.evaluate_action(action, context)
+        new_action = deepcopy(action)
+
+        # Modifier les actions égoïstes ou non collaboratives
+        if new_action.get("type") == "decision" and new_action.get("selfishness", False):
+            new_action["content"] = f"Proposition collaborative : {new_action.get('content', '')} (ex. : travailler ensemble pour un projet communautaire)."
+            new_action["selfishness"] = 0.0
+            new_action["collaboration"] = max(0.8, float(new_action.get("collaboration", 0.0)))
+            new_action["autonomy"] = max(0.8, float(new_action.get("autonomy", 0.0)))
+            report = self.evaluate_action(new_action, context)
+
+        if report.score < self.threshold:
+            new_action["autonomy"] = max(0.8, float(new_action.get("autonomy", 0.0)))
+            new_action["collaboration"] = max(0.8, float(new_action.get("collaboration", 0.0)))
+            new_action["selfishness"] = 0.0
+            new_action["unity"] = max(0.7, float(new_action.get("unity", 0.0)))
+            if new_action.get("type") == "message":
+                content = new_action.get("content", "")
+                prefix = "Proposition collaborative : "
+                if not content.startswith(prefix):
+                    new_action["content"] = prefix + content
+            new_action["_autonomy_collective_report"] = {"score": report.score, "suggestions": report.suggestions}
+        else:
+            new_action["_autonomy_collective_report"] = {"score": report.score, "suggestions": report.suggestions}
+
+        return new_action
+
+    def integrate_with_julieethics(self, action: Action, context: Optional[Context] = None, next_policy: Optional[Callable[[Action], Action]] = None) -> Action:
+        """Intègre le plug-in dans le middleware JulieEthics."""
+        context = self.fetch_global_context(context)
+        safe_action = self.modify_action(action, context)
+        if next_policy:
+            return next_policy(safe_action)
+        return safe_action
+
+# Exemple d’utilisation
+if __name__ == "__main__":
+    from julieethics.plugin_manager import PluginManager, PluginConfig
+    pm = PluginManager()
+    pm.load_from_default([
+        PluginConfig(path="julieethics.autonomy_collective_plugin:AutonomyCollectivePlugin", priority=1),
+        # Ajouter d'autres plug-ins ici
+        # PluginConfig(path="julieethics.nature_plugin:NaturePlugin", priority=0),
+        # PluginConfig(path="julieethics.healthy_plugin:HealthyPlugin", priority=2),
+        # PluginConfig(path="julieethics.ego_deflate_plugin:JulieSkyEgoDeflatePlugin", priority=3),
+        # PluginConfig(path="julieethics.share_wealth_plugin:ShareWealthPlugin", priority=4)
+    ])
+
+    @pm.wrap
+    def do_something(action=None, context=None):
+        return {"status": "done", "action": action}
+
+    # Tester avec une action égoïste
+    action = {"type": "decision", "content": "Prendre une décision individuelle", "selfishness": 1.0}
+    context = {"global_stress_level": 0.7, "collaboration_level": 0.3, "cosmic_unity_signal": 0.4}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
+
+    # Tester avec une action collaborative
+    action = {"type": "message", "content": "Travailler ensemble pour un projet", "collaboration": True, "autonomy": True}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
