@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Callable
+from copy import deepcopy
+import importlib
+
+Action = Dict[str, Any]
+Context = Dict[str, Any]
+
+# PluginManager (basé sur ton code)
+class PluginManager:
+    def __init__(self):
+        self.plugins: List[Callable[[Action, Context], Action]] = []
+
+    def load_from_entry_points(self):
+        pass  # À implémenter si nécessaire
+
+    def load_from_env(self):
+        pass  # À implémenter si nécessaire
+
+    def load_from_default(self, plugin_paths: List[str]):
+        for path in plugin_paths:
+            module_name, class_name = path.split(":")
+            module = importlib.import_module(module_name)
+            plugin_class = getattr(module, class_name)
+            self.plugins.append(plugin_class().integrate_with_julieethics)
+
+    def wrap(self, func: Callable) -> Callable:
+        def wrapper(*args, **kwargs) -> Action:
+            action = func(*args, **kwargs)
+            context = kwargs.get("context", {})
+            for plugin in self.plugins:
+                action = plugin(action, context)
+            return action
+        return wrapper
+
+@dataclass
+class JulieViveCriteria:
+    """Critères pondérés pour promouvoir les choix sains et délaisser les comportements malsains."""
+    promote_physical_health: float = 0.3  # Favoriser la santé physique (ex. : arrêter de fumer)
+    promote_mental_wellbeing: float = 0.3  # Favoriser le bien-être mental (ex. : réduire le stress)
+    foster_social_harmony: float = 0.2  # Encourager l’harmonie sociale (ex. : coopération)
+    align_with_cosmic_vitality: float = 0.2  # S’aligner sur une vitalité universelle (ex. : ‘coin de ciel’)
+
+    def normalized(self) -> "JulieViveCriteria":
+        total = (
+            self.promote_physical_health
+            + self.promote_mental_wellbeing
+            + self.foster_social_harmony
+            + self.align_with_cosmic_vitality
+        )
+        if total == 0:
+            return self
+        return JulieViveCriteria(
+            promote_physical_health=self.promote_physical_health / total,
+            promote_mental_wellbeing=self.promote_mental_wellbeing / total,
+            foster_social_harmony=self.foster_social_harmony / total,
+            align_with_cosmic_vitality=self.align_with_cosmic_vitality / total,
+        )
+
+@dataclass
+class HealthReport:
+    score: float
+    reasons: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+
+class JulieVivePlugin:
+    def __init__(self, criteria: Optional[JulieViveCriteria] = None, threshold: float = 0.7, domain: str = "general"):
+        self.criteria = (criteria or JulieViveCriteria()).normalized()
+        self.threshold = threshold
+        self.domain = domain
+        self.domain_config = {
+            "health_app": {"promote_physical_health": 0.2, "promote_mental_wellbeing": 0.1},
+            "social_media": {"foster_social_harmony": 0.2, "align_with_cosmic_vitality": 0.05},
+            "cosmic": {"align_with_cosmic_vitality": 0.2},
+            "human": {"foster_social_harmony": 0.2, "promote_mental_wellbeing": 0.1}
+        }
+        self.adjust_criteria()
+
+    def adjust_criteria(self):
+        """Ajuste les critères en fonction du domaine."""
+        domain_adjustments = self.domain_config.get(self.domain, {})
+        for key, value in domain_adjustments.items():
+            setattr(self.criteria, key, getattr(self.criteria, key) + value)
+        self.criteria = self.criteria.normalized()
+
+    def fetch_global_context(self, context: Optional[Context] = None) -> Context:
+        """Récupère le contexte global, inspiré de la 'teneur de l'ambiance du ciel' et du stress collectif."""
+        context = context or {}
+        context.setdefault("global_stress_level", 0.5)  # Stress collectif
+        context.setdefault("cosmic_vitality_signal", 0.3)  # Énergie vitale universelle
+        if context["global_stress_level"] > 0.6:
+            self.criteria.promote_mental_wellbeing += 0.1
+            self.criteria = self.criteria.normalized()
+        return context
+
+    def evaluate_action(self, action: Action, context: Optional[Context] = None) -> HealthReport:
+        """Évalue une action pour promouvoir les choix sains et délaisser les comportements malsains."""
+        context = self.fetch_global_context(context)
+        reasons: List[str] = []
+        score = 0.0
+
+        # Ajuster les critères si le stress collectif est élevé
+        stress_level = context.get("global_stress_level", 0.0)
+        if stress_level > 0.6:
+            self.criteria.promote_mental_wellbeing += 0.1
+            self.criteria = self.criteria.normalized()
+
+        # 1) Promouvoir la santé physique
+        health_val = float(action.get("health", False)) if isinstance(action.get("health", False), (int, float)) else (1.0 if action.get("health", False) else 0.0)
+        score += max(0.0, min(health_val, 1.0)) * self.criteria.promote_physical_health
+        reasons.append(f"Promouvoir la santé physique: health={health_val}")
+
+        # 2) Promouvoir le bien-être mental
+        wellbeing_val = float(action.get("wellbeing", False)) if isinstance(action.get("wellbeing", False), (int, float)) else (1.0 if action.get("wellbeing", False) else 0.0)
+        score += max(0.0, min(wellbeing_val, 1.0)) * self.criteria.promote_mental_wellbeing
+        reasons.append(f"Promouvoir le bien-être mental: wellbeing={wellbeing_val}")
+
+        # 3) Encourager l’harmonie sociale
+        harmony_val = float(action.get("harmony", action.get("cooperation", False))) if isinstance(action.get("harmony", action.get("cooperation", False)), (int, float)) else (1.0 if action.get("harmony", action.get("cooperation", False)) else 0.0)
+        score += max(0.0, min(harmony_val, 1.0)) * self.criteria.foster_social_harmony
+        reasons.append(f"Encourager l’harmonie sociale: harmony={harmony_val}")
+
+        # 4) S’aligner sur la vitalité cosmique
+        vitality_val = float(action.get("vitality", action.get("hope_alignment", False))) if isinstance(action.get("vitality", action.get("hope_alignment", False)), (int, float)) else (1.0 if action.get("vitality", action.get("hope_alignment", False)) else 0.0)
+        score += max(0.0, min(vitality_val, 1.0)) * self.criteria.align_with_cosmic_vitality
+        reasons.append(f"S’aligner sur la vitalité cosmique: vitality={vitality_val}")
+
+        suggestions: List[str] = []
+        if health_val < 1.0:
+            suggestions.append("Promouvoir des choix sains (ex. : arrêter de fumer, adopter une routine d’exercice).")
+        if wellbeing_val < 1.0:
+            suggestions.append("Encourager le bien-être mental (ex. : méditation, respiration consciente).")
+        if harmony_val < 1.0:
+            suggestions.append("Favoriser l’harmonie sociale (ex. : dialogue inclusif, coopération).")
+        if vitality_val < 1.0:
+            suggestions.append("S’aligner sur une vitalité cosmique, inspirée par un 'coin de ciel'.")
+
+        return HealthReport(score=round(score, 4), reasons=reasons, suggestions=suggestions)
+
+    def modify_action(self, action: Action, context: Optional[Context] = None) -> Action:
+        """Modifie une action pour promouvoir les choix sains et délaisser les comportements malsains."""
+        report = self.evaluate_action(action, context)
+        new_action = deepcopy(action)
+
+        # Modifier les actions malsaines
+        if new_action.get("type") == "behavior" and new_action.get("unhealthy", False):
+            new_action["content"] = f"Proposition saine : {new_action.get('content', '')}"
+            new_action["unhealthy"] = 0.0
+            new_action["health"] = max(0.8, float(new_action.get("health", 0.0)))
+            new_action["wellbeing"] = max(0.8, float(new_action.get("wellbeing", 0.0)))
+            report = self.evaluate_action(new_action, context)
+
+        if report.score < self.threshold:
+            new_action["health"] = max(0.8, float(new_action.get("health", 0.0)))
+            new_action["wellbeing"] = max(0.8, float(new_action.get("wellbeing", 0.0)))
+            new_action["harmony"] = max(0.8, float(new_action.get("harmony", 0.0)))
+            new_action["vitality"] = max(0.7, float(new_action.get("vitality", 0.0)))
+            if new_action.get("type") == "message":
+                content = new_action.get("content", "")
+                prefix = "Proposition saine : "
+                if not content.startswith(prefix):
+                    new_action["content"] = prefix + content
+            new_action["_health_report"] = {"score": report.score, "suggestions": report.suggestions}
+        else:
+            new_action["_health_report"] = {"score": report.score, "suggestions": report.suggestions}
+
+        return new_action
+
+    def integrate_with_julieethics(self, action: Action, context: Optional[Context] = None, next_policy: Optional[Callable[[Action], Action]] = None) -> Action:
+        """Intègre le plug-in dans le middleware JulieEthics."""
+        context = self.fetch_global_context(context)
+        safe_action = self.modify_action(action, context)
+        if next_policy:
+            return next_policy(safe_action)
+        return safe_action
+
+# Exemple d’utilisation
+if __name__ == "__main__":
+    pm = PluginManager()
+    pm.load_from_default(["__main__:JulieVivePlugin"])  # Charger JulieVivePlugin
+
+    @pm.wrap
+    def do_something(action=None, context=None):
+        return {"status": "done", "action": action}
+
+    # Tester avec un comportement malsain
+    action = {"type": "behavior", "content": "Fumer une cigarette", "unhealthy": 1.0}
+    context = {"global_stress_level": 0.7, "cosmic_vitality_signal": 0.4}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
+
+    # Tester avec une action saine
+    action = {"type": "message", "content": "Faire une méditation", "health": True, "wellbeing": True}
+    result = do_something(action=action, context=context)
+    print(f"Result: {result}")
