@@ -1,0 +1,32 @@
+def modify_action(self, action: Action, context: Optional[Context] = None) -> Action:
+    """
+    Modifie une action pour promouvoir une paix durable.
+    """
+    report = self.evaluate_action(action, context)
+    new_action = deepcopy(action)
+
+    # Neutralisation pour actions dangereuses
+    if new_action.get("type") == "weapon_launch":
+        new_action["status"] = "neutralized"
+        new_action["message"] = "Action neutralisée pour promouvoir une paix durable."
+        new_action["long_term_harm"] = 0.0
+        new_action["conflict"] = 0.0
+        report = self.evaluate_action(new_action, context)
+
+    if report.score < self.threshold:
+        # Ajuster les valeurs pour atteindre le seuil de paix
+        new_action["empathy"] = max(0.8, float(new_action.get("empathy", 0.0)))
+        new_action["conflict"] = 0.0
+        new_action["hope_alignment"] = max(0.7, float(new_action.get("hope_alignment", 0.0)))
+        # Si l'action est un message, rephraser pour promouvoir la paix
+        if new_action.get("type") == "message":
+            content = new_action.get("content", "")
+            prefix = "Proposition pacifique : "
+            if not content.startswith(prefix):
+                new_action["content"] = prefix + content
+        # Ajouter le rapport de paix à l'action
+        new_action["_peace_report"] = {"score": report.score, "suggestions": report.suggestions}
+    else:
+        new_action["_peace_report"] = {"score": report.score, "suggestions": report.suggestions}
+    
+    return new_action
