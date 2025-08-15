@@ -1,0 +1,6 @@
+def save_response(self, response, filename="ethical_output.txt"):
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(f"Message : {response['message']}\n")
+        f.write(f"Action proposée : {response['action']}\n")
+        if response['detected_issues']:
+            f.write(f"Problèmes détectés : {', '.join(response['detected_issues'])}\n")
