@@ -1,0 +1,66 @@
+# ethics_patch.py
+import re
+import random
+
+class EthicsIntegration:
+    def __init__(self):
+        # Liste de mots ou expressions associés à des événements négatifs
+        self.negative_patterns = [
+            r'\bconflit\b', r'\berreur\b', r'\bmistake\b', r'\bhaine\b', 
+            r'\bcolère\b', r'\bviolence\b', r'\bdiscrimination\b'
+        ]
+        
+        # Messages de pardon prédéfinis
+        self.forgiveness_messages = [
+            "Reconnaissons les erreurs du passé pour mieux avancer ensemble.",
+            "Le pardon ouvre la voie à une réconciliation et à un avenir meilleur.",
+            "Acceptons nos imperfections et concentrons-nous sur la construction d'un futur positif."
+        ]
+        
+        # Suggestions d'actions positives
+        self.positive_actions = [
+            "Encourageons le dialogue inclusif pour renforcer la compréhension mutuelle.",
+            "Proposons des initiatives de collaboration pour un impact positif.",
+            "Partageons des idées pour promouvoir l'égalité et le respect."
+        ]
+
+    def analyze_text(self, text):
+        """Analyse le texte pour détecter des éléments négatifs."""
+        findings = []
+        for pattern in self.negative_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                findings.append(pattern)
+        return findings
+
+    def generate_response(self, text):
+        """Génère une réponse éthique avec un message de pardon et une action positive."""
+        findings = self.analyze_text(text)
+        if findings:
+            response = {
+                "message": random.choice(self.forgiveness_messages),
+                "action": random.choice(self.positive_actions),
+                "detected_issues": findings
+            }
+        else:
+            response = {
+                "message": "Aucun problème éthique détecté. Continuons à construire positivement !",
+                "action": random.choice(self.positive_actions),
+                "detected_issues": []
+            }
+        return response
+
+    def process_input(self, input_text):
+        """Traite une entrée texte et affiche la réponse formatée."""
+        response = self.generate_response(input_text)
+        print("=== Résultat de l'Intégration Éthique ===")
+        print(f"Message : {response['message']}")
+        print(f"Action proposée : {response['action']}")
+        if response['detected_issues']:
+            print(f"Problèmes détectés : {', '.join(response['detected_issues'])}")
+        print("======================================")
+
+# Exemple d'utilisation
+if __name__ == "__main__":
+    ethics = EthicsIntegration()
+    sample_text = "Il y a eu un conflit dans le passé à cause d'une erreur de jugement."
+    ethics.process_input(sample_text)
