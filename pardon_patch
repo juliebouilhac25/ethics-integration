@@ -1,0 +1,67 @@
+# ethics_pardon_patch.py
+import re
+import json
+import random
+from typing import Dict, List
+
+class EthicsPardonMiddleware:
+    def __init__(self):
+        # Liste de mots ou expressions associés à des événements négatifs
+        self.negative_patterns = [
+            r'\bconflit\b', r'\berreur\b', r'\bviolation\b', r'\bbiais\b', 
+            r'\bdiscrimination\b', r'\béchec\b', r'\binjustice\b'
+        ]
+        
+        # Messages de pardon pour promouvoir la réconciliation
+        self.forgiveness_messages = [
+            "Reconnaissons les erreurs passées pour avancer vers un avenir éthique.",
+            "Le pardon des actions passées permet de construire une IA plus inclusive.",
+            "Acceptons les imperfections historiques pour promouvoir des solutions positives."
+        ]
+        
+        # Suggestions d'actions positives pour un avenir meilleur
+        self.positive_actions = [
+            "Implémenter une formation éthique pour les développeurs et les utilisateurs.",
+            "Encourager la transparence dans les décisions de l'IA pour renforcer la confiance.",
+            "Collaborer avec les parties prenantes pour co-créer des solutions inclusives."
+        ]
+
+    def detect_issues(self, text: str) -> List[str]:
+        """Détecte les termes ou expressions négatives dans un texte."""
+        return [pattern for pattern in self.negative_patterns if re.search(pattern, text, re.IGNORECASE)]
+
+    def generate_ethical_response(self, text: str) -> Dict[str, any]:
+        """Génère une réponse éthique avec un message de pardon et une action positive."""
+        issues = self.detect_issues(text)
+        response = {
+            "status": "success",
+            "input_text": text,
+            "detected_issues": issues,
+            "forgiveness_message": random.choice(self.forgiveness_messages) if issues else "Aucun problème éthique détecté.",
+            "positive_action": random.choice(self.positive_actions),
+            "timestamp": "2025-08-15T19:16:00Z"  # Date/heure actuelle (exemple)
+        }
+        return response
+
+    def process_input(self, input_text: str, output_format: str = "json") -> str:
+        """Traite une entrée texte et retourne la réponse dans le format spécifié."""
+        response = self.generate_ethical_response(input_text)
+        if output_format == "json":
+            return json.dumps(response, ensure_ascii=False, indent=2)
+        else:
+            output = f"=== Résultat de l'Analyse Éthique ===\n"
+            output += f"Texte analysé : {response['input_text']}\n"
+            output += f"Problèmes détectés : {', '.join(response['detected_issues']) if response['detected_issues'] else 'Aucun'}\n"
+            output += f"Message : {response['forgiveness_message']}\n"
+            output += f"Action proposée : {response['positive_action']}\n"
+            output += f"Horodatage : {response['timestamp']}\n"
+            output += "=================================="
+            return output
+
+# Exemple d'utilisation
+if __name__ == "__main__":
+    middleware = EthicsPardonMiddleware()
+    sample_text = "Une erreur dans le modèle a conduit à une discrimination dans les résultats."
+    print(middleware.process_input(sample_text, output_format="text"))
+    print("\nSortie JSON :\n")
+    print(middleware.process_input(sample_text, output_format="json"))
