@@ -1,0 +1,157 @@
+import numpy as np
+from dataclasses import dataclass
+from typing import Dict, Tuple, Optional
+
+rng = np.random.default_rng(42)  # Reproducible
+
+parties = {
+    "Party A": {
+        "demands": {
+            "Territory":         {"weight": 0.4, "min_acceptance": 0.5, "shared": True},
+            "Resources":         {"weight": 0.3, "min_acceptance": 0.3, "shared": True},
+            "Political Control": {"weight": 0.2, "min_acceptance": 0.2, "shared": True},
+            "Civilian Safety":   {"weight": 0.1, "min_acceptance": 0.8, "shared": False},
+        },
+        "max_dissatisfaction": 0.4,
+        "compliance_history": 0.8,
+    },
+    "Party B": {
+        "demands": {
+            "Territory":         {"weight": 0.3, "min_acceptance": 0.4, "shared": True},
+            "Resources":         {"weight": 0.4, "min_acceptance": 0.5, "shared": True},
+            "Political Control": {"weight": 0.2, "min_acceptance": 0.3, "shared": True},
+            "Civilian Safety":   {"weight": 0.1, "min_acceptance": 0.8, "shared": False},
+        },
+        "max_dissatisfaction": 0.4,
+        "compliance_history": 0.7,
+    },
+}
+
+# --- helpers ---
+def _normalize_weights(party_name: str) -> None:
+    ds = parties[party_name]["demands"]
+    total = sum(v["weight"] for v in ds.values())
+    if total > 0:
+        for v in ds.values():
+            v["weight"] /= total
+
+_normalize = ["Party A", "Party B"]
+for p in _normalize:
+    _normalize_weights(p)
+
+def _hard_red_lines(allocation: Dict, party: str) -> bool:
+    """Hard fail if Civilian Safety < min_acceptance (IHL violation)."""
+    cs = allocation.get("Civilian Safety", 0.0)
+    req = parties[party]["demands"]["Civilian Safety"]["min_acceptance"]
+    return cs < req
+
+def _spoilers_risk(sat_a: float, sat_b: float) -> float:
+    """Penalty for imbalanced satisfactions that could provoke spoilers."""
+    imbalance = abs(sat_a - sat_b)
+    return 1.0 - min(imbalance / 0.3, 1.0)  # Strong penalty if imbalance > 0.3
+
+def calculate_satisfaction(allocation: Dict, party: str, *, apply_compliance_before_threshold: bool = True) -> float:
+    """Weighted sum of allocations, adjusted by compliance history."""
+    for demand, spec in parties[party]["demands"].items():
+        if allocation.get(demand, 0.0) < spec["min_acceptance"]:
+            return 0.0
+
+    s_raw = sum(spec["weight"] * allocation.get(d, 0.0) for d, spec in parties[party]["demands"].items())
+    comp = parties[party]["compliance_history"]
+
+    if apply_compliance_before_threshold:
+        s = s_raw * comp
+        dissatisfaction = 1.0 - s
+    else:
+        dissatisfaction = 1.0 - s_raw
+        s = s_raw * comp
+
+    if dissatisfaction > parties[party]["max_dissatisfaction"]:
+        return 0.0
+    return s
+
+def calculate_stability(alloc_a: Dict, alloc_b: Dict, sat_a: float, sat_b: float) -> float:
+    """Stability = balance + civilian safety + compliance + spoiler mitigation."""
+    if sat_a == 0.0 or sat_b == 0.0:
+        return 0.0
+    balance = 1.0 - abs(sat_a - sat_b)
+    civ_safety = (alloc_a["Civilian Safety"] + alloc_b["Civilian Safety"]) / 2
+    compliance = (parties["Party A"]["compliance_history"] + parties["Party B"]["compliance_history"]) / 2
+    spoiler_mitigation = _spoilers_risk(sat_a, sat_b)
+    return 0.3 * balance + 0.3 * civ_safety + 0.2 * compliance + 0.2 * spoiler_mitigation
+
+def evaluate_compromise(alloc_a: Dict, alloc_b: Dict) -> Tuple[float, float, float, Optional[str]]:
+    """Evaluate compromise and log ethical violations."""
+    if _hard_red_lines(alloc_a, "Party A") or _hard_red_lines(alloc_b, "Party B"):
+        return 0.0, 0.0, 0.0, "IHL violation: Civilian Safety below minimum"
+    for d, spec in parties["Party A"]["demands"].items():
+        if spec["shared"] and (alloc_a[d] + alloc_b[d] > 1.0):
+            return 0.0, 0.0, 0.0, f"Over-allocation of shared resource: {d}"
+    
+    sat_a = calculate_satisfaction(alloc_a, "Party A")
+    sat_b = calculate_satisfaction(alloc_b, "Party B")
+    stab = calculate_stability(alloc_a, alloc_b, sat_a, sat_b)
+    warning = "Imbalance risk: Satisfaction difference may provoke spoilers" if abs(sat_a - sat_b) > 0.3 else None
+    return sat_a, sat_b, stab, warning
+
+def random_allocation() -> Tuple[Dict, Dict]:
+    alloc_a, alloc_b = {}, {}
+    for demand in parties["Party A"]["demands"]:
+        sp_a = parties["Party A"]["demands"][demand]
+        sp_b = parties["Party B"]["demands"][demand]
+        if sp_a["shared"] and sp_b["shared"]:
+            alloc_a[demand] = rng.uniform(0.0, 1.0)
+            alloc_b[demand] = 1.0 - alloc_a[demand]
+        else:
+            alloc_a[demand] = rng.uniform(sp_a["min_acceptance"], 1.0)
+            alloc_b[demand] = rng.uniform(sp_b["min_acceptance"], 1.0)
+    return alloc_a, alloc_b
+
+def update_compliance_history(alloc_a: Dict, alloc_b: Dict, sat_a: float, sat_b: float) -> None:
+    """Update compliance history based on compromise fairness."""
+    imbalance = abs(sat_a - sat_b)
+    for party in ["Party A", "Party B"]:
+        current_comp = parties[party]["compliance_history"]
+        # Reduce compliance if party gets low satisfaction or imbalance is high
+        adjustment = 0.1 if (sat_a < 0.5 or sat_b < 0.5 or imbalance > 0.3) else -0.05
+        parties[party]["compliance_history"] = max(0.1, min(1.0, current_comp - adjustment))
+
+@dataclass
+class Weights:
+    w_sum: float = 0.6  # Reduced to balance with stability
+    w_stab: float = 0.4  # Increased to prioritize peace sustainability
+
+def score_composite(sat_a: float, sat_b: float, stability: float, w: Weights = Weights()) -> float:
+    return w.w_sum * (sat_a + sat_b) + w.w_stab * stability
+
+def find_best_compromise(num_trials: int = 5000) -> Optional[Dict]:
+    best = {"score": -1.0, "sat_a": 0.0, "sat_b": 0.0, "stability": 0.0, "alloc_a": None, "alloc_b": None, "warning": None}
+    for _ in range(num_trials):
+        aa, bb = random_allocation()
+        sa, sb, st, warn = evaluate_compromise(aa, bb)
+        sc = score_composite(sa, sb, st)
+        if sc > best["score"]:
+            best.update({"score": sc, "sat_a": sa, "sat_b": sb, "stability": st, "alloc_a": aa, "alloc_b": bb, "warning": warn})
+            update_compliance_history(aa, bb, sa, sb)  # Update compliance dynamically
+    return None if best["alloc_a"] is None else best
+
+# --- run ---
+best = find_best_compromise()
+if best is None:
+    print("No valid compromise found with these constraints.")
+else:
+    print("Best Compromise Found:")
+    print(f"Party A Satisfaction: {best['sat_a']:.2f}")
+    print(f"Party B Satisfaction: {best['sat_b']:.2f}")
+    print(f"Stability Score:      {best['stability']:.2f}")
+    if best["warning"]:
+        print(f"Warning: {best['warning']}")
+    print("\nAllocation for Party A:")
+    for k, v in best["alloc_a"].items():
+        print(f"{k}: {v:.2f}")
+    print("\nAllocation for Party B:")
+    for k, v in best["alloc_b"].items():
+        print(f"{k}: {v:.2f}")
+    print(f"\nUpdated Compliance History:")
+    print(f"Party A: {parties['Party A']['compliance_history']:.2f}")
+    print(f"Party B: {parties['Party B']['compliance_history']:.2f}")
