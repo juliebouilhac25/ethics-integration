@@ -1,0 +1,91 @@
+import numpy as np
+
+# Define the parties and their priorities
+parties = {
+    "Party A": {
+        "demands": {
+            "Territory": {"weight": 0.4, "min_acceptance": 0.5},
+            "Resources": {"weight": 0.3, "min_acceptance": 0.3},
+            "Political Control": {"weight": 0.2, "min_acceptance": 0.2},
+            "Civilian Safety": {"weight": 0.1, "min_acceptance": 0.8}  # High priority on humanitarian aspect
+        },
+        "max_dissatisfaction": 0.4  # Party A won't accept a deal with >40% dissatisfaction
+    },
+    "Party B": {
+        "demands": {
+            "Territory": {"weight": 0.3, "min_acceptance": 0.4},
+            "Resources": {"weight": 0.4, "min_acceptance": 0.5},
+            "Political Control": {"weight": 0.2, "min_acceptance": 0.3},
+            "Civilian Safety": {"weight": 0.1, "min_acceptance": 0.8}  # High priority on humanitarian aspect
+        },
+        "max_dissatisfaction": 0.4  # Party B won't accept a deal with >40% dissatisfaction
+    }
+}
+
+# Function to calculate satisfaction for a given allocation
+def calculate_satisfaction(allocation, party):
+    satisfaction = 0
+    for demand, value in allocation.items():
+        weight = parties[party]["demands"][demand]["weight"]
+        min_acceptance = parties[party]["demands"][demand]["min_acceptance"]
+        # Satisfaction is 0 if allocation is below minimum acceptance
+        if value < min_acceptance:
+            return 0
+        satisfaction += weight * value
+    dissatisfaction = 1 - satisfaction
+    return satisfaction if dissatisfaction <= parties[party]["max_dissatisfaction"] else 0
+
+# Function to evaluate a compromise
+def evaluate_compromise(alloc_a, alloc_b):
+    # Ensure resources sum to 1 (or less for shared concessions)
+    for demand in alloc_a:
+        if alloc_a[demand] + alloc_b[demand] > 1:
+            return 0, 0  # Invalid allocation (over-allocated resource)
+    
+    satisfaction_a = calculate_satisfaction(alloc_a, "Party A")
+    satisfaction_b = calculate_satisfaction(alloc_b, "Party B")
+    
+    # Fairness: Compromise is viable only if both parties are sufficiently satisfied
+    if satisfaction_a == 0 or satisfaction_b == 0:
+        return 0, 0
+    return satisfaction_a, satisfaction_b
+
+# Simulate multiple compromise scenarios
+def find_best_compromise(num_trials=1000):
+    best_satisfaction = (0, 0)
+    best_allocation = (None, None)
+    
+    for _ in range(num_trials):
+        # Randomly allocate resources for each demand
+        alloc_a = {}
+        alloc_b = {}
+        for demand in parties["Party A"]["demands"]:
+            # Ensure at least minimum acceptance for civilian safety
+            if demand == "Civilian Safety":
+                alloc_a[demand] = max(parties["Party A"]["demands"][demand]["min_acceptance"], np.random.uniform(0.8, 1.0))
+                alloc_b[demand] = max(parties["Party B"]["demands"][demand]["min_acceptance"], np.random.uniform(0.8, 1.0))
+            else:
+                alloc_a[demand] = np.random.uniform(0, 1)
+                alloc_b[demand] = 1 - alloc_a[demand]  # Resources split between parties
+        
+        sat_a, sat_b = evaluate_compromise(alloc_a, alloc_b)
+        if sat_a + sat_b > best_satisfaction[0] + best_satisfaction[1]:
+            best_satisfaction = (sat_a, sat_b)
+            best_allocation = (alloc_a, alloc_b)
+    
+    return best_satisfaction, best_allocation
+
+# Run the simulation
+best_satisfaction, best_allocation = find_best_compromise()
+alloc_a, alloc_b = best_allocation
+
+# Output results
+print("Best Compromise Found:")
+print(f"Party A Satisfaction: {best_satisfaction[0]:.2f}")
+print(f"Party B Satisfaction: {best_satisfaction[1]:.2f}")
+print("\nAllocation for Party A:")
+for demand, value in alloc_a.items():
+    print(f"{demand}: {value:.2f}")
+print("\nAllocation for Party B:")
+for demand, value in alloc_b.items():
+    print(f"{demand}: {value:.2f}")
