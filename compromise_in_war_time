@@ -1,91 +1,139 @@
 import numpy as np
+from dataclasses import dataclass
 
-# Define the parties and their priorities
+rng = np.random.default_rng(42)  # reproductible
+
 parties = {
     "Party A": {
         "demands": {
-            "Territory": {"weight": 0.4, "min_acceptance": 0.5},
-            "Resources": {"weight": 0.3, "min_acceptance": 0.3},
-            "Political Control": {"weight": 0.2, "min_acceptance": 0.2},
-            "Civilian Safety": {"weight": 0.1, "min_acceptance": 0.8}  # High priority on humanitarian aspect
+            "Territory":         {"weight": 0.4, "min_acceptance": 0.5, "shared": True},
+            "Resources":         {"weight": 0.3, "min_acceptance": 0.3, "shared": True},
+            "Political Control": {"weight": 0.2, "min_acceptance": 0.2, "shared": True},
+            "Civilian Safety":   {"weight": 0.1, "min_acceptance": 0.8, "shared": False},
         },
-        "max_dissatisfaction": 0.4  # Party A won't accept a deal with >40% dissatisfaction
+        "max_dissatisfaction": 0.4,
+        "compliance_history": 0.8,
     },
     "Party B": {
         "demands": {
-            "Territory": {"weight": 0.3, "min_acceptance": 0.4},
-            "Resources": {"weight": 0.4, "min_acceptance": 0.5},
-            "Political Control": {"weight": 0.2, "min_acceptance": 0.3},
-            "Civilian Safety": {"weight": 0.1, "min_acceptance": 0.8}  # High priority on humanitarian aspect
+            "Territory":         {"weight": 0.3, "min_acceptance": 0.4, "shared": True},
+            "Resources":         {"weight": 0.4, "min_acceptance": 0.5, "shared": True},
+            "Political Control": {"weight": 0.2, "min_acceptance": 0.3, "shared": True},
+            "Civilian Safety":   {"weight": 0.1, "min_acceptance": 0.8, "shared": False},
         },
-        "max_dissatisfaction": 0.4  # Party B won't accept a deal with >40% dissatisfaction
-    }
+        "max_dissatisfaction": 0.4,
+        "compliance_history": 0.7,
+    },
 }
 
-# Function to calculate satisfaction for a given allocation
-def calculate_satisfaction(allocation, party):
-    satisfaction = 0
-    for demand, value in allocation.items():
-        weight = parties[party]["demands"][demand]["weight"]
-        min_acceptance = parties[party]["demands"][demand]["min_acceptance"]
-        # Satisfaction is 0 if allocation is below minimum acceptance
-        if value < min_acceptance:
-            return 0
-        satisfaction += weight * value
-    dissatisfaction = 1 - satisfaction
-    return satisfaction if dissatisfaction <= parties[party]["max_dissatisfaction"] else 0
+# --- helpers ---
+def _normalize_weights(party_name: str) -> None:
+    ds = parties[party_name]["demands"]
+    total = sum(v["weight"] for v in ds.values())
+    if total > 0:
+        for v in ds.values():
+            v["weight"] /= total
 
-# Function to evaluate a compromise
-def evaluate_compromise(alloc_a, alloc_b):
-    # Ensure resources sum to 1 (or less for shared concessions)
-    for demand in alloc_a:
-        if alloc_a[demand] + alloc_b[demand] > 1:
-            return 0, 0  # Invalid allocation (over-allocated resource)
-    
-    satisfaction_a = calculate_satisfaction(alloc_a, "Party A")
-    satisfaction_b = calculate_satisfaction(alloc_b, "Party B")
-    
-    # Fairness: Compromise is viable only if both parties are sufficiently satisfied
-    if satisfaction_a == 0 or satisfaction_b == 0:
-        return 0, 0
-    return satisfaction_a, satisfaction_b
+_normalize = ["Party A", "Party B"]
+for p in _normalize:
+    _normalize_weights(p)
 
-# Simulate multiple compromise scenarios
-def find_best_compromise(num_trials=1000):
-    best_satisfaction = (0, 0)
-    best_allocation = (None, None)
-    
+def _hard_red_lines(allocation: dict, party: str) -> bool:
+    """Hard fail si Civilian Safety < min_acceptance."""
+    cs = allocation.get("Civilian Safety", 0.0)
+    req = parties[party]["demands"]["Civilian Safety"]["min_acceptance"]
+    return cs < req
+
+def calculate_satisfaction(allocation: dict, party: str, *, apply_compliance_before_threshold=True) -> float:
+    """Somme pondérée des valeurs (poids normalisés).
+       Si apply_compliance_before_threshold=True, on applique la confiance AVANT de tester la dissatisfaction."""
+    # 1) min_acceptance sur toutes les dimensions
+    for demand, spec in parties[party]["demands"].items():
+        if allocation.get(demand, 0.0) < spec["min_acceptance"]:
+            return 0.0
+
+    # 2) satisfaction brute
+    s_raw = sum(
+        parties[party]["demands"][d]["weight"] * allocation.get(d, 0.0)
+        for d in parties[party]["demands"]
+    )
+    comp = parties[party]["compliance_history"]
+
+    if apply_compliance_before_threshold:
+        s = s_raw * comp
+        dissatisfaction = 1.0 - s
+    else:
+        dissatisfaction = 1.0 - s_raw
+        s = s_raw * comp
+
+    if dissatisfaction > parties[party]["max_dissatisfaction"]:
+        return 0.0
+    return s
+
+def calculate_stability(alloc_a: dict, alloc_b: dict, sat_a: float, sat_b: float) -> float:
+    """Stabilité = équilibre (sats proches) + sécurité civils + confiance moyenne."""
+    if sat_a == 0.0 or sat_b == 0.0:
+        return 0.0
+    balance = 1.0 - abs(sat_a - sat_b)                    # [0..1]
+    civ_safety = (alloc_a["Civilian Safety"] + alloc_b["Civilian Safety"]) / 2  # [0.8..1]
+    compliance = (parties["Party A"]["compliance_history"] + parties["Party B"]["compliance_history"]) / 2
+    return 0.4 * balance + 0.4 * civ_safety + 0.2 * compliance
+
+def evaluate_compromise(alloc_a: dict, alloc_b: dict) -> tuple[float, float, float]:
+    # hard fail IHL
+    if _hard_red_lines(alloc_a, "Party A") or _hard_red_lines(alloc_b, "Party B"):
+        return 0.0, 0.0, 0.0
+    # contrainte de partage
+    for d, spec in parties["Party A"]["demands"].items():
+        if spec["shared"] and (alloc_a[d] + alloc_b[d] > 1.0):
+            return 0.0, 0.0, 0.0
+
+    sat_a = calculate_satisfaction(alloc_a, "Party A", apply_compliance_before_threshold=True)
+    sat_b = calculate_satisfaction(alloc_b, "Party B", apply_compliance_before_threshold=True)
+    stab  = calculate_stability(alloc_a, alloc_b, sat_a, sat_b)
+    return sat_a, sat_b, stab
+
+def random_allocation() -> tuple[dict, dict]:
+    alloc_a, alloc_b = {}, {}
+    for demand in parties["Party A"]["demands"]:
+        sp_a = parties["Party A"]["demands"][demand]
+        sp_b = parties["Party B"]["demands"][demand]
+        if sp_a["shared"] and sp_b["shared"]:
+            alloc_a[demand] = rng.uniform(0.0, 1.0)
+            alloc_b[demand] = 1.0 - alloc_a[demand]
+        else:
+            alloc_a[demand] = rng.uniform(sp_a["min_acceptance"], 1.0)
+            alloc_b[demand] = rng.uniform(sp_b["min_acceptance"], 1.0)
+    return alloc_a, alloc_b
+
+@dataclass
+class Weights:
+    w_sum: float = 0.7  # poids pour (satA + satB)
+    w_stab: float = 0.3 # poids pour stability
+
+def score_composite(sat_a: float, sat_b: float, stability: float, w: Weights = Weights()) -> float:
+    return w.w_sum * (sat_a + sat_b) + w.w_stab * stability
+
+def find_best_compromise(num_trials: int = 5000) -> dict | None:
+    best = {"score": -1.0, "sat_a": 0.0, "sat_b": 0.0, "stability": 0.0, "alloc_a": None, "alloc_b": None}
     for _ in range(num_trials):
-        # Randomly allocate resources for each demand
-        alloc_a = {}
-        alloc_b = {}
-        for demand in parties["Party A"]["demands"]:
-            # Ensure at least minimum acceptance for civilian safety
-            if demand == "Civilian Safety":
-                alloc_a[demand] = max(parties["Party A"]["demands"][demand]["min_acceptance"], np.random.uniform(0.8, 1.0))
-                alloc_b[demand] = max(parties["Party B"]["demands"][demand]["min_acceptance"], np.random.uniform(0.8, 1.0))
-            else:
-                alloc_a[demand] = np.random.uniform(0, 1)
-                alloc_b[demand] = 1 - alloc_a[demand]  # Resources split between parties
-        
-        sat_a, sat_b = evaluate_compromise(alloc_a, alloc_b)
-        if sat_a + sat_b > best_satisfaction[0] + best_satisfaction[1]:
-            best_satisfaction = (sat_a, sat_b)
-            best_allocation = (alloc_a, alloc_b)
-    
-    return best_satisfaction, best_allocation
+        aa, bb = random_allocation()
+        sa, sb, st = evaluate_compromise(aa, bb)
+        sc = score_composite(sa, sb, st)
+        if sc > best["score"]:
+            best.update({"score": sc, "sat_a": sa, "sat_b": sb, "stability": st, "alloc_a": aa, "alloc_b": bb})
+    return None if best["alloc_a"] is None else best
 
-# Run the simulation
-best_satisfaction, best_allocation = find_best_compromise()
-alloc_a, alloc_b = best_allocation
-
-# Output results
-print("Best Compromise Found:")
-print(f"Party A Satisfaction: {best_satisfaction[0]:.2f}")
-print(f"Party B Satisfaction: {best_satisfaction[1]:.2f}")
-print("\nAllocation for Party A:")
-for demand, value in alloc_a.items():
-    print(f"{demand}: {value:.2f}")
-print("\nAllocation for Party B:")
-for demand, value in alloc_b.items():
-    print(f"{demand}: {value:.2f}")
+# --- run ---
+best = find_best_compromise()
+if best is None:
+    print("No valid compromise found with these constraints.")
+else:
+    print("Best Compromise Found:")
+    print(f"Party A Satisfaction: {best['sat_a']:.2f}")
+    print(f"Party B Satisfaction: {best['sat_b']:.2f}")
+    print(f"Stability Score:      {best['stability']:.2f}")
+    print("\nAllocation for Party A:")
+    for k, v in best["alloc_a"].items(): print(f"{k}: {v:.2f}")
+    print("\nAllocation for Party B:")
+    for k, v in best["alloc_b"].items(): print(f"{k}: {v:.2f}")
